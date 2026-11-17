@@ -57,9 +57,15 @@ export function asPromise<T>(work: () => T): Promise<T> {
   try {
     return Promise.resolve(work());
   } catch (error) {
-    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    // Pass the original error through untouched (see isUniqueViolation for why not `instanceof Error`).
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    return Promise.reject(error);
   }
 }
 
+/**
+ * Duck-typed on purpose: `SqliteError` is created by the native addon, which may hold the class from another
+ * JS realm (e.g. Jest module registries), so `instanceof Error` is not reliable.
+ */
 export const isUniqueViolation = (error: unknown): boolean =>
-  error instanceof Error && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE';
+  typeof error === 'object' && error !== null && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE';

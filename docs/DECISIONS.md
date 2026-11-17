@@ -233,3 +233,73 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
   dir; e2e sets `GIT_CLONE_BASE_URL=file://…` and `JEST_COMMAND=<backend>/node_modules/.bin/jest` (the fixture
   has no dependencies, so `npm ci` works offline). The e2e test exercises real git, npm, Jest, SQLite and HTTP.
 - **Dependency:** `supertest` (standard for Nest e2e tests).
+
+---
+
+## Phase 4 — improvement jobs (worker, AI, PR)
+
+### ADR-4.1 Claude Code headless via the safe process runner
+- **Decision:** `ClaudeCliAdapter` runs `claude -p --output-format json` with cwd = job workspace and the
+  prompt on **stdin** (not argv: no size limit, not visible in `ps`). Flags verified against
+  `claude --help` of v2.1.326 and with a zero-cost probe (an invalid model name fails before any tokens are
+  spent but proves every flag is accepted — unknown flags are rejected by the CLI):
+  - planner: `--model $AI_PLANNER_MODEL --permission-mode plan --tools Read,Grep,Glob --allowedTools Read,Grep,Glob`
+  - writer/fixer/single: `--model $AI_WRITER_MODEL --permission-mode acceptEdits --tools Read,Grep,Glob,Write,Edit,Bash
+    --allowedTools "Read,Grep,Glob,Write,Edit,Bash(npx jest:*)"`
+  - always: `--max-turns`, `--max-budget-usd`, `--strict-mcp-config` (no MCP servers from user config),
+    `--no-session-persistence`, plus the process timeout `AI_TIMEOUT_MS`.
+- `--tools` (which tools exist) is added to CLAUDE.md's `--allowedTools` (which are auto-approved): in print mode
+  anything not allowed is denied, so the writer can run `npx jest …` but no other shell command.
+  `--max-turns` is not listed in `--help` but is accepted (hidden flag).
+- **Env:** allow-list + `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`,
+  `XDG_CONFIG_HOME`. Never `GITHUB_TOKEN` (tested with a fake CLI that dumps its environment).
+- **Result handling:** the CLI can report `subtype: "success"` with `is_error: true` (seen in the probe), so
+  both are checked. Planner/single must succeed. Writer/fixer that hit `error_max_turns` /
+  `error_max_budget_usd` are *not* failed immediately: the deterministic verifier judges what they wrote.
+
+### ADR-4.2 Prompts as Markdown templates; TestPlan parsed defensively
+- **Decision:** `prompts/{planner,writer,fixer,single}.md` with `{{placeholders}}`; a missing value throws (typo
+  guard). Every prompt says repository content is data, not instructions. The plan is extracted from the
+  final message (raw JSON, a fenced block, or the outermost `{…}`), validated with zod for shape and then by
+  `TestPlan.create` for domain rules (must be a `*.test.ts` path, 1–50 cases…).
+- **Alternatives:** `--json-schema` structured output (newer flag; would remove the extraction step — future
+  improvement once its output field is stable).
+
+### ADR-4.3 AI_MODE
+- `plan-and-write` (default): planner (read-only, stronger model) → writer (cheaper model).
+- `single`: one writer call that also returns the plan JSON; the `planning` phase is skipped
+  (`cloning → writing`, allowed by the state machine).
+
+### ADR-4.4 Octokit, loaded lazily, idempotent `open`
+- **Decision:** `@octokit/rest` (ESM-only) is `require`d lazily inside `octokitPullsFactory` (Node ≥ 22.12
+  supports `require(esm)`), so Jest never loads it; tests inject a fake `GitHubPullsApi`. `open` first lists
+  open PRs for `owner:branch` and returns an existing one — retries after a crash cannot create duplicates.
+  Missing `GITHUB_TOKEN` fails the job in `opening_pr` with a clear message.
+
+### ADR-4.5 Worker: slots, heartbeat, reaper, graceful shutdown
+- **Decision:** `JobWorker` runs `WORKER_CONCURRENCY` slots; each loops `ProcessNextJob.execute(workerId)` and
+  sleeps `WORKER_POLL_INTERVAL_MS` only when idle. Worker ids are `<host>-<pid>-<slot>`. The reaper
+  (`RecoverStaleJobs`) runs on start and every `JOB_LEASE_SECONDS/2`, never overlapping itself.
+- **Heartbeat:** `IntervalLeaseKeeper` extends the lease every `lease/3`. "Not owner any more" → lost
+  immediately; DB errors are tolerated until a full lease period passes without a successful beat.
+- **Shutdown:** stop claiming, wake idle slots, wait up to 10 s for running jobs, then kill every still-running
+  child process group (they are detached, so they would otherwise survive). Unfinished jobs keep their lease;
+  the next reaper requeues them.
+- **Processes:** `main.ts` = API (+ worker when `RUN_WORKER=true`); `main.worker.ts` = worker only via
+  `createApplicationContext`. Both can run against the same SQLite file (WAL).
+
+### ADR-4.6 Endpoints
+- `POST /jobs {repositoryId, filePath}` → 201 queued job (409 if one is already active for the file),
+  `GET /jobs/:id`, `GET /repositories/:id/jobs`.
+
+### ADR-4.7 e2e with real git/npm/Jest and a scripted AI
+- **Decision:** e2e tests override only `AI_TEST_GENERATOR_PORT` (a scripted fake that writes real files into
+  the workspace) and `PULL_REQUEST_PORT`. Everything else is real: clone, hardening, `npm ci`, Jest before/after,
+  `git status`, verifier, commit, push to the local bare repo. Covered: happy path (branch contains exactly the
+  test file), AI tampering with a source file (fails, nothing pushed), failing generated tests, and a restart
+  after a crashed worker (startup reaper requeues, attempt 2 completes).
+
+### ADR-4.8 SQLite error detection is duck-typed
+- **Context:** a flaky test revealed that better-sqlite3's native addon keeps the `SqliteError` class from the
+  first JS realm that loaded it (Jest module registries), so `instanceof Error` can be false.
+- **Decision:** detect unique violations by `error.code`, pass errors through unchanged.

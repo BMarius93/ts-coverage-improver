@@ -34,6 +34,37 @@ export class ProcessError extends Error {
 
 const KILL_GRACE_MS = 5_000;
 
+/**
+ * Process groups of children that are still running. Children are detached (own group) so a timeout can
+ * kill grandchildren; the flip side is that they would outlive this process, so shutdown kills them.
+ */
+const activeGroups = new Set<number>();
+let exitHookInstalled = false;
+
+/** Kills every still-running child process group (used on shutdown). Returns how many were signalled. */
+export function terminateAllProcesses(signal: NodeJS.Signals = 'SIGKILL'): number {
+  let count = 0;
+  for (const pid of activeGroups) {
+    try {
+      process.kill(-pid, signal);
+      count++;
+    } catch {
+      // already gone
+    }
+  }
+  activeGroups.clear();
+  return count;
+}
+
+function trackGroup(pid: number | undefined): void {
+  if (pid === undefined) return;
+  activeGroups.add(pid);
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.once('exit', () => terminateAllProcesses());
+  }
+}
+
 /** Keeps only the last `max` bytes of a stream so a chatty process cannot exhaust memory. */
 class TailBuffer {
   private chunks: Buffer[] = [];
@@ -74,6 +105,7 @@ export function runProcess(
       detached: true, // own process group, so the timeout can kill grandchildren (npx -> node -> jest workers)
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    trackGroup(child.pid);
     const stdout = new TailBuffer(maxBytes);
     const stderr = new TailBuffer(maxBytes);
     let timedOut = false;
@@ -103,6 +135,7 @@ export function runProcess(
       reject(new ProcessError(`Could not start ${command}: ${error.message}`, null));
     });
     child.on('close', (exitCode, signal) => {
+      if (child.pid !== undefined) activeGroups.delete(child.pid);
       clearTimeout(timeout);
       clearTimeout(killTimer);
       if (timedOut) killGroup('SIGKILL'); // make sure no grandchild survives

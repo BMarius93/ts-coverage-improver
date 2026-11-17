@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ export interface E2eContext {
   app: INestApplication;
   remote: FixtureRemote;
   dataDir: string;
-  close(): Promise<void>;
+  close(options?: { keepData?: boolean }): Promise<void>;
 }
 
 /**
@@ -19,12 +19,12 @@ export interface E2eContext {
 export async function createE2eApp(
   rootModule: unknown,
   env: Record<string, string> = {},
-  configure: (
-    builder: ReturnType<typeof Test.createTestingModule>,
-  ) => ReturnType<typeof Test.createTestingModule> = (b) => b,
+  configure: (builder: TestingModuleBuilder) => TestingModuleBuilder = (builder) => builder,
+  /** Reuse the remote and database of a previous app (e.g. to simulate a restart after a crash). */
+  reuse?: { remote: FixtureRemote; dataDir: string },
 ): Promise<E2eContext> {
-  const remote = createFixtureRemote();
-  const dataDir = mkdtempSync(join(tmpdir(), 'coverage-improver-e2e-'));
+  const remote = reuse?.remote ?? createFixtureRemote();
+  const dataDir = reuse?.dataDir ?? mkdtempSync(join(tmpdir(), 'coverage-improver-e2e-'));
   const previous = { ...process.env };
   Object.assign(process.env, {
     DATABASE_PATH: join(dataDir, 'app.db'),
@@ -36,20 +36,24 @@ export async function createE2eApp(
     PROCESS_TIMEOUT_MS: '60000',
     ...env,
   });
-  const moduleRef = await configure(Test.createTestingModule({ imports: [rootModule as never] })).compile();
-  const app = moduleRef.createNestApplication({ logger: ['error'] });
-  await app.init();
-  process.env = previous;
-  return {
-    app,
-    remote,
-    dataDir,
-    close: async () => {
-      await app.close();
-      remote.cleanup();
-      rmSync(dataDir, { recursive: true, force: true });
-    },
-  };
+  try {
+    const moduleRef = await configure(Test.createTestingModule({ imports: [rootModule as never] })).compile();
+    const app = moduleRef.createNestApplication({ logger: ['error'] });
+    await app.init();
+    return {
+      app,
+      remote,
+      dataDir,
+      close: async (options = {}) => {
+        await app.close();
+        if (options.keepData) return;
+        remote.cleanup();
+        rmSync(dataDir, { recursive: true, force: true });
+      },
+    };
+  } finally {
+    process.env = previous;
+  }
 }
 
 export async function waitFor<T>(
