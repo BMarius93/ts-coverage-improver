@@ -361,3 +361,20 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
   suites. Everything around it is covered: e2e with a local bare repository and a scripted AI, the Claude
   adapter against a fake CLI, and a zero-cost probe of the real CLI flags. The README's demo guide is the
   manual check that produces the example PR.
+
+---
+
+## Phase 7 — hardening
+
+### ADR-7.1 Flaky check: repeat the verification run
+- **Context:** A test that passes once can still be flaky (timers, ordering, shared state). Opening a PR with a
+  flaky test costs reviewer trust.
+- **Decision:** Once a verification passes, `ProcessNextJob` runs `coverage.measureFile` another
+  `VERIFY_RUNS - 1` times (default `VERIFY_RUNS=2`). The verifier gets `stableAcrossRuns`: `true` when every run
+  passed with identical line coverage, `false` otherwise, `null` when only one run was made (or the first run
+  already failed — no point repeating it). `false` adds the failure "Tests are not stable across runs." and the
+  normal fix loop runs; the fixer receives the output of every run, labelled per run. The PR reports the first
+  run's coverage.
+- **Alternatives:** Jest `--randomize`/`--runInBand` variations (more signal, slower); rerunning only the new test
+  file (misses interactions with existing tests).
+- **Consequences:** One extra Jest run per successful verification. `VERIFY_RUNS=1` disables the check.

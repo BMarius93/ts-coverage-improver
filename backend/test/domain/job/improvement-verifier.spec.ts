@@ -9,6 +9,7 @@ describe('ImprovementVerifier', () => {
     testsPassed: true,
     coverageBefore: pct(10),
     coverageAfter: pct(60),
+    stableAcrossRuns: null,
   };
 
   it('passes when only tests changed, tests pass and coverage increased', () => {
@@ -49,6 +50,13 @@ describe('ImprovementVerifier', () => {
 
   it('fails when tests fail', () => {
     expect(verifier.verify({ ...base, testsPassed: false }).failures).toEqual(['Tests are failing.']);
+  });
+
+  it('fails when repeated runs disagree, and passes when they agree', () => {
+    expect(verifier.verify({ ...base, stableAcrossRuns: false }).failures).toEqual([
+      'Tests are not stable across runs.',
+    ]);
+    expect(verifier.verify({ ...base, stableAcrossRuns: true }).passed).toBe(true);
   });
 
   it('fails when coverage did not increase or could not be measured', () => {

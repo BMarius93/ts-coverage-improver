@@ -27,6 +27,8 @@ export type AiMode = 'single' | 'plan-and-write';
 export interface ProcessNextJobOptions {
   aiMode: AiMode;
   maxFixAttempts: number;
+  /** How often the tests run during a successful verification (>= 2 detects flaky tests). */
+  verifyRuns: number;
   leaseMs: number;
   keepFailedWorkspaces: boolean;
 }
@@ -53,6 +55,15 @@ export type ProcessOutcome =
   | { kind: 'abandoned'; jobId: string; reason: string };
 
 class VerificationFailedError extends Error {}
+
+interface VerificationAttempt {
+  verification: VerificationOutcome;
+  /** The first run: its coverage is what the PR reports. */
+  measurement: FileMeasurement;
+  changedFiles: ChangedFile[];
+  /** Test output for the fixer (all runs when repeated). */
+  output: string;
+}
 
 interface RunState {
   job: ImprovementJob;
@@ -129,31 +140,20 @@ export class ProcessNextJob {
     const plan = await this.planAndWrite(state, context);
 
     // verifying <-> fixing
-    let measurement: FileMeasurement;
-    let changedFiles: ChangedFile[];
+    let attempt: VerificationAttempt;
     for (;;) {
       await this.advance(state, 'verifying');
-      measurement = await this.deps.coverage.measureFile(dir, job.targetFile);
-      changedFiles = await this.deps.git.changedFiles(dir);
-      const verification = this.verifier.verify({
-        changedFiles,
-        expectedDeletions: removedPaths,
-        testsPassed: measurement.testsPassed,
-        coverageBefore,
-        coverageAfter: measurement.coverage?.lines ?? null,
-      });
-      if (measurement.coverage) {
-        job.recordCoverageAfter(measurement.coverage.lines, this.now());
-      }
-      if (verification.passed) {
+      attempt = await this.verify(state, dir, removedPaths, coverageBefore);
+      if (attempt.verification.passed) {
         break;
       }
       if (job.fixAttempts >= this.options.maxFixAttempts) {
-        throw new VerificationFailedError(this.describeFailure(verification, job.fixAttempts));
+        throw new VerificationFailedError(this.describeFailure(attempt.verification, job.fixAttempts));
       }
       await this.advance(state, 'fixing');
-      await this.deps.ai.fix(context, plan, verification.failures, measurement.output);
+      await this.deps.ai.fix(context, plan, attempt.verification.failures, attempt.output);
     }
+    const { measurement, changedFiles } = attempt;
 
     // opening_pr
     await this.advance(state, 'opening_pr');
@@ -182,6 +182,59 @@ export class ProcessNextJob {
     job.complete(prUrl, coverageAfter, this.now());
     await this.persist(state);
     return prUrl.value;
+  }
+
+  /**
+   * Measures, inspects the working tree and applies the verifier. Once a first run passes, the tests are run
+   * `verifyRuns - 1` more times: every run must pass with identical line coverage, otherwise the result is
+   * treated as flaky and goes to the fix loop with the output of every run.
+   */
+  private async verify(
+    state: RunState,
+    dir: string,
+    removedPaths: string[],
+    coverageBefore: CoveragePercentage,
+  ): Promise<VerificationAttempt> {
+    const { job } = state;
+    const first = await this.deps.coverage.measureFile(dir, job.targetFile);
+    const changedFiles = await this.deps.git.changedFiles(dir);
+    const input = {
+      changedFiles,
+      expectedDeletions: removedPaths,
+      testsPassed: first.testsPassed,
+      coverageBefore,
+      coverageAfter: first.coverage?.lines ?? null,
+      stableAcrossRuns: null,
+    };
+    if (first.coverage) {
+      job.recordCoverageAfter(first.coverage.lines, this.now());
+    }
+    let verification = this.verifier.verify(input);
+    if (!verification.passed || this.options.verifyRuns <= 1) {
+      return { verification, measurement: first, changedFiles, output: first.output };
+    }
+
+    const runs = [first];
+    for (let run = 2; run <= this.options.verifyRuns; run++) {
+      runs.push(await this.deps.coverage.measureFile(dir, job.targetFile));
+    }
+    const stableAcrossRuns = runs.every(
+      (run) => run.testsPassed && run.coverage !== null && run.coverage.lines.equals(first.coverage!.lines),
+    );
+    verification = this.verifier.verify({ ...input, stableAcrossRuns });
+    if (!stableAcrossRuns) {
+      this.deps.logger.warn('Flaky verification', {
+        jobId: job.id,
+        runs: runs.map((run) => ({ passed: run.testsPassed, lines: run.coverage?.lines.value ?? null })),
+      });
+    }
+    const output = runs
+      .map(
+        (run, index) =>
+          `--- verification run ${index + 1} (${run.testsPassed ? 'passed' : 'failed'}) ---\n${run.output}`,
+      )
+      .join('\n\n');
+    return { verification, measurement: first, changedFiles, output };
   }
 
   private async planAndWrite(state: RunState, context: TestGenerationContext): Promise<TestPlan> {

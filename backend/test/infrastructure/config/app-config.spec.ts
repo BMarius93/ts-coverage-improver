@@ -7,6 +7,7 @@ describe('loadConfig', () => {
     expect(config.PORT).toBe(3000);
     expect(config.AI_MODE).toBe('plan-and-write');
     expect(config.KEEP_FAILED_WORKSPACES).toBe(true);
+    expect(config.VERIFY_RUNS).toBe(2);
     expect(isAbsolute(config.databasePath)).toBe(true);
     expect(config.maxScanDurationMs).toBe(config.PROCESS_TIMEOUT_MS * 3);
   });

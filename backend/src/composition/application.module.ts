@@ -125,6 +125,7 @@ export const COVERAGE_THRESHOLD = Symbol('CoverageThreshold');
           {
             aiMode: config.AI_MODE,
             maxFixAttempts: config.AI_MAX_FIX_ATTEMPTS,
+            verifyRuns: config.VERIFY_RUNS,
             leaseMs: config.JOB_LEASE_SECONDS * 1000,
             keepFailedWorkspaces: config.KEEP_FAILED_WORKSPACES,
           },

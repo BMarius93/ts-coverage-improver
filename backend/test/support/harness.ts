@@ -22,7 +22,12 @@ export const LEASE_MS = 60_000;
 
 /** All fakes wired together, plus helpers to seed a scanned repository and queue jobs. */
 export function createHarness(
-  options: { aiMode?: AiMode; maxFixAttempts?: number; keepFailedWorkspaces?: boolean } = {},
+  options: {
+    aiMode?: AiMode;
+    maxFixAttempts?: number;
+    keepFailedWorkspaces?: boolean;
+    verifyRuns?: number;
+  } = {},
 ) {
   const clock = new FixedClock();
   const ids = new SequentialIds('job');
@@ -53,6 +58,7 @@ export function createHarness(
     {
       aiMode: options.aiMode ?? 'plan-and-write',
       maxFixAttempts: options.maxFixAttempts ?? 2,
+      verifyRuns: options.verifyRuns ?? 2,
       leaseMs: LEASE_MS,
       keepFailedWorkspaces: options.keepFailedWorkspaces ?? false,
     },

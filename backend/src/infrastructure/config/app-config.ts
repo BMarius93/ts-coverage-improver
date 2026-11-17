@@ -43,6 +43,8 @@ const schema = z.object({
   AI_MAX_BUDGET_USD: z.coerce.number().positive().default(3),
   AI_TIMEOUT_MS: int(1000, 3_600_000).default(600_000),
   AI_MAX_FIX_ATTEMPTS: int(0, 10).default(2),
+  /** Runs of the related tests during verification; all must pass with identical coverage. */
+  VERIFY_RUNS: int(1, 5).default(2),
 });
 
 export type RawConfig = z.infer<typeof schema>;

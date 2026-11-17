@@ -14,6 +14,11 @@ export interface VerificationInput {
   testsPassed: boolean;
   coverageBefore: CoveragePercentage;
   coverageAfter: CoveragePercentage | null;
+  /**
+   * Whether repeated runs of the same tests all passed with identical line coverage.
+   * `null` when only one run was made (nothing to compare).
+   */
+  stableAcrossRuns: boolean | null;
 }
 
 export interface VerificationOutcome {
@@ -27,7 +32,8 @@ const TEST_FILE = /\.test\.tsx?$/;
  * Deterministic gate between "the AI says it is done" and "we open a PR". No AI involved:
  * 1. the AI may only add or modify `*.test.ts` files,
  * 2. the tests must pass,
- * 3. line coverage of the target file must strictly increase.
+ * 3. line coverage of the target file must strictly increase,
+ * 4. repeated runs must agree (no flaky tests).
  */
 export class ImprovementVerifier {
   verify(input: VerificationInput): VerificationOutcome {
@@ -49,6 +55,9 @@ export class ImprovementVerifier {
     }
     if (!input.testsPassed) {
       failures.push('Tests are failing.');
+    }
+    if (input.stableAcrossRuns === false) {
+      failures.push('Tests are not stable across runs.');
     }
     if (input.coverageAfter === null) {
       failures.push('Coverage of the target file could not be measured.');

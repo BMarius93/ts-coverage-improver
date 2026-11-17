@@ -148,6 +148,52 @@ describe('ProcessNextJob', () => {
     });
   });
 
+  describe('flaky check (VERIFY_RUNS)', () => {
+    it('runs the tests twice after a passing verification and accepts identical results', async () => {
+      const h = await setup();
+      const outcome = await h.processNextJob.execute('worker-1');
+      expect(outcome.kind).toBe('completed');
+      expect(h.coverage.measureFileCalls).toBe(3); // before + 2 verification runs
+    });
+
+    it('sends a run that passes then fails to the fixer with both outputs', async () => {
+      const h = await setup();
+      h.coverage.fileMeasurements = [
+        measurement(10),
+        measurement(85),
+        measurement(85, false),
+        measurement(85),
+      ];
+      const outcome = await h.processNextJob.execute('worker-1');
+
+      expect(outcome.kind).toBe('completed');
+      expect(h.ai.calls).toEqual(['plan', 'write', 'fix']);
+      expect(h.ai.fixRequests[0].failures).toEqual(['Tests are not stable across runs.']);
+      expect(h.ai.fixRequests[0].output).toContain('--- verification run 1 (passed) ---\nPASS');
+      expect(h.ai.fixRequests[0].output).toContain('--- verification run 2 (failed) ---\nFAIL');
+      expect(h.logger.entries.some((e) => e.message === 'Flaky verification')).toBe(true);
+    });
+
+    it('treats differing coverage between runs as flaky and fails when fixes run out', async () => {
+      const h = await setup({ maxFixAttempts: 0 });
+      h.coverage.fileMeasurements = [measurement(10), measurement(85), measurement(70)];
+      const outcome = await h.processNextJob.execute('worker-1');
+      expect(outcome.kind === 'failed' && outcome.error).toContain('Tests are not stable across runs.');
+      expect(h.pullRequests.opened).toHaveLength(0);
+    });
+
+    it('does not repeat a run that already failed, and runs once with VERIFY_RUNS=1', async () => {
+      const failing = await setup({ maxFixAttempts: 0 });
+      failing.coverage.fileMeasurements = [measurement(10), measurement(10)];
+      await failing.processNextJob.execute('worker-1');
+      expect(failing.coverage.measureFileCalls).toBe(2);
+
+      const single = await setup({ verifyRuns: 1 });
+      await single.processNextJob.execute('worker-1');
+      expect(single.coverage.measureFileCalls).toBe(2);
+    });
+  });
+
   describe('failure at every phase', () => {
     const cases: Array<[string, JobPhase, (h: Harness) => void]> = [
       ['clone fails', 'cloning', (h) => (h.git.failOn.clone = new Error('clone failed'))],
