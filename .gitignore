@@ -1,6 +1,8 @@
 node_modules/
-dist/
-coverage/
+/backend/dist/
+/frontend/dist/
+/backend/coverage/
+/frontend/coverage/
 .env
 data/
 workspaces/
