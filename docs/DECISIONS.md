@@ -337,3 +337,27 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
   classification and polling-interval logic in `lib/format.ts`. Components are kept thin and are verified by
   `tsc`, ESLint (incl. `react-hooks`) and a manual run; no jsdom/Testing Library to keep dependencies minimal.
 - **Consequences:** UI regressions would be caught manually; component tests are a future improvement.
+
+---
+
+## Phase 6 — docs + demo
+
+### ADR-6.1 Documentation set
+- **Decision:** `README.md` (overview, prerequisites incl. PAT permissions, setup, demo guide, config table,
+  limitations with proposed solutions), `docs/ARCHITECTURE.md` (Mermaid: layers, runtime topology, job state
+  machine, pipeline sequence, failure-handling table), `docs/GLOSSARY.md` (ubiquitous language ↔ code).
+- `.env.example` gained `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` and documents the testing-only
+  `GIT_CLONE_BASE_URL`/`JEST_COMMAND`; it is meant to be copied to `backend/.env`. A check confirmed it parses
+  with `loadConfig` (including the inline `# comment`).
+
+### ADR-6.2 One workspace per attempt
+- **Context:** while writing the failure-handling docs: after a `kill -9`, detached child processes (e.g. the AI
+  CLI) can outlive the backend; a retry reusing `jobs/<jobId>` would share the directory with such an orphan.
+- **Decision:** job workspaces are `jobs/<jobId>-attempt-<n>`.
+- **Consequences:** an orphan can never modify the clone that a retry verifies and pushes.
+
+### ADR-6.3 The real end-to-end run is manual
+- **Decision:** the GitHub + Claude flow needs credentials and costs money, so it is not part of the automated
+  suites. Everything around it is covered: e2e with a local bare repository and a scripted AI, the Claude
+  adapter against a fake CLI, and a zero-cost probe of the real CLI flags. The README's demo guide is the
+  manual check that produces the example PR.

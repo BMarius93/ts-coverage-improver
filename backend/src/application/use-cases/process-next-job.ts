@@ -106,7 +106,8 @@ export class ProcessNextJob {
     }
 
     // cloning: fresh clone, job branch, hardening, dependencies, baseline coverage
-    state.dir = await this.deps.workspace.create('job', job.id);
+    // One directory per attempt: a process orphaned by a hard-killed previous attempt cannot touch this clone.
+    state.dir = await this.deps.workspace.create('job', `${job.id}-attempt-${job.attempts}`);
     const dir = state.dir;
     await this.deps.git.clone(repository.url, dir);
     await this.deps.git.createBranch(dir, this.branchOf(job));
