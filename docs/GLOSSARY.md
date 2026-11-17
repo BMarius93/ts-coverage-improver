@@ -23,6 +23,11 @@ Ubiquitous language used in code, API and UI.
 | **Test plan** | The planner's validated proposal: test file path (`*.test.ts`), summary and cases. Included in the PR body. | `TestPlan` |
 | **Planner / writer / fixer** | The three AI roles: read-only analysis → writes tests → repairs tests from verifier feedback. `single` mode merges planner and writer. | `ClaudeCliAdapter` |
 | **Verification** | Deterministic gate (no AI): only `*.test.ts` added/modified, tests pass, target line coverage strictly increased. | `ImprovementVerifier` |
+| **Flaky check** | After a passing verification the tests run `VERIFY_RUNS - 1` more times; all runs must pass with identical line coverage (`stableAcrossRuns`). | `ProcessNextJob.verify` |
+| **Reverted files** | Non-test files the AI changed that the pipeline restored from git before verification; listed in the PR body. | `GitPort.restoreNonTestChanges`, `ImprovementJob.revertedFiles` |
+| **Job budget** | Per-job limits: total AI spend (`AI_JOB_MAX_BUDGET_USD`) and a deadline counted from the request (`JOB_DEADLINE_MS`). | `JobBudget`, `ImprovementJob.aiCostUsd` |
+| **Uncovered branch** | A branch point with a path no test took, e.g. "line 42 if: else path never taken"; given to the AI. | `CoverageReportParser.uncoveredBranches` |
+| **Style example** | The shortest existing test file of the repository, shown to the AI to match conventions. | `TestFileScanner.styleExample` |
 | **Hardening** | Deleting `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` from the clone so the target repo cannot instruct the AI agent; plus minimal env, restricted tools, `--ignore-scripts`. | `HARDENING_PATHS` |
 | **Workspace** | Scratch directory for one scan or job: `WORKSPACE_DIR/{scans,jobs}/<id>`. | `WorkspacePort` |
 | **Worker / slot** | Background loop that claims and processes jobs; a process runs `WORKER_CONCURRENCY` slots, each with its own worker id. | `JobWorker` |

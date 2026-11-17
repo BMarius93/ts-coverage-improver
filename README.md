@@ -132,8 +132,10 @@ Paths are relative to the backend's working directory.
   and interval, attempts cap, idempotent push/PR on retry, timeouts that kill whole process groups, graceful
   shutdown.
 - **Safety.** The AI runs with cwd = clone, restricted tools (`--tools`, `--allowedTools`, only `Bash(npx jest:*)`),
-  turn/budget/time limits, no MCP servers, and an environment without `GITHUB_TOKEN`; `.claude/` and `CLAUDE.md` are
-  deleted from the clone; `npm ci --ignore-scripts`; only verified `*.test.ts` files are committed, by name.
+  writes allowed only for `*.test.ts(x)` (`dontAsk` + permission rules), turn/budget/time limits (per call and per
+  job), no MCP servers, and an environment without `GITHUB_TOKEN`; `.claude/` and `CLAUDE.md` are deleted from the
+  clone; `npm ci --ignore-scripts`; non-test edits are reverted before every verification; tests must pass
+  `VERIFY_RUNS` times with identical coverage; only verified `*.test.ts` files are committed, by name.
 - Every decision and trade-off is recorded in [docs/DECISIONS.md](docs/DECISIONS.md); terms in
   [docs/GLOSSARY.md](docs/GLOSSARY.md).
 
@@ -141,7 +143,7 @@ Paths are relative to the backend's working directory.
 
 ```bash
 cd backend
-npm test            # 273 unit/integration tests (domain 100 % covered; SQLite, git, process, AI adapter with a fake CLI)
+npm test            # 313 unit/integration tests (domain 100 % covered; SQLite, git, process, AI adapter with a fake CLI)
 npm run test:e2e    # 8 e2e tests: real git/npm/Jest against a local bare repo, scripted AI, crash recovery
 npm run lint        # ESLint (incl. layer rules) + Prettier
 npm run test:cov
@@ -168,4 +170,9 @@ points `GIT_CLONE_BASE_URL` at it and replaces only the AI and GitHub-API ports.
 | A hard-killed (`kill -9`) backend leaves its child processes running | Children run in their own process group so timeouts can kill grandchildren; `SIGKILL` cannot be intercepted. Graceful shutdown kills them; each retry uses a fresh per-attempt workspace, so orphans cannot interfere. | Run jobs in containers (see above) or a supervisor that owns the process groups. |
 | Barrel files (`index.ts` with re-exports) appear with low coverage | The scan glob overrides the target's own `collectCoverageFrom`. | Respect the target's Jest config when present, or ignore files with no executable lines besides exports. |
 | AI output format | The plan is extracted from the final message text and validated (zod + domain rules). | Use the CLI's `--json-schema` structured output once relied upon. |
+| Write restriction for the AI relies on Claude Code permission rules (`dontAsk` + `Edit(**/*.test.ts)`) | Flags verified against v2.1.326 and the docs, but enforcement can only be observed in a paid run; `AI_RESTRICT_WRITES=false` falls back to `acceptEdits`. | Correctness does not depend on it: non-test edits are reverted by git and rejected by the verifier. Add a recorded real run to CI with a small budget. |
+| Flaky detection is heuristic | `VERIFY_RUNS` identical runs catch most nondeterminism, not all (e.g. rare races, time-of-day). | Run with `--randomize` / in a different order, or more runs for files with timers. |
+| Budget is a hard stop | A job that spends its budget on the writer fails at the next phase change, even if its tests might have verified; the deadline counts queue time. | Allow a final free verification after the last AI call, or a separate queue-time limit. |
+| Context scan repeats on every measurement | `existingTestFiles`/`styleExample` are part of each `FileMeasurement`; the walk is bounded (5 000 entries) but repeated. | Compute them once per job in a dedicated port. |
+| Only line coverage gates a PR | Branch coverage is reported (PR body) but may even decrease. | Make the gate configurable (lines and/or branches). |
 | The real GitHub/Claude flow is not part of the automated tests | Needs credentials and costs money. | Covered by fakes/e2e with a local bare repo; run the demo manually (above). |

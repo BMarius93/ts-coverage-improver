@@ -115,21 +115,28 @@ sequenceDiagram
 
   W->>Q: claimNext(workerId, lease)
   Note over W: heartbeat extends lease every lease/3
+  Note over W: budget check: deadline (JOB_DEADLINE_MS) may have passed while queued
   W->>G: shallow clone, create branch coverage/file-slug-jobid
   W->>W: delete .claude/, CLAUDE.md (hardening)
-  W->>C: npm ci --ignore-scripts; jest --findRelatedTests (before)
-  W->>A: planner (read-only tools) → TestPlan JSON (zod + domain validation)
-  W->>A: writer (Read/Write/Edit, Bash(npx jest:*))
+  W->>C: npm ci --ignore-scripts; jest --findRelatedTests (before: lines, branches, existing tests, style example)
+  Note over W,A: before every AI call and on every phase change: AI spend < AI_JOB_MAX_BUDGET_USD and deadline not passed
+  W->>A: planner (read-only tools, --max-budget-usd = min(remaining, per-call cap)) → TestPlan JSON
+  W->>A: writer (dontAsk; Edit/Write only for *.test.ts(x); Bash(npx jest:*)) → cost recorded
   loop until verified or fix attempts exhausted
-    W->>C: jest --findRelatedTests (after)
+    W->>G: restore non-test changes (git checkout / remove), record reverted paths
+    W->>C: jest --findRelatedTests (after, run 1)
     W->>G: git status
     W->>V: only *.test.ts changed? tests pass? coverage up?
-    alt failed and attempts left
-      W->>A: fixer (failures + Jest output)
+    opt run 1 passed and VERIFY_RUNS > 1
+      W->>C: jest --findRelatedTests (runs 2..N)
+      W->>V: every run passed with identical coverage? (stableAcrossRuns)
+    end
+    alt failed and fix attempts left
+      W->>A: fixer (failures + output of every run) → cost recorded
     end
   end
   W->>G: git add test files, commit, push --force (job-owned branch)
-  W->>H: open PR (returns existing open PR for the branch on retry)
+  W->>H: open PR: lines + branches, runs, reverted edits, AI cost
   W->>Q: complete(prUrl, coverageAfter)
 ```
 
@@ -143,6 +150,9 @@ a worker that lost its job abandons it without writing.
 | --- | --- |
 | Clone / npm / Jest / AI / push / PR error | Job `failed` in the phase where it happened, error stored, workspace kept if `KEEP_FAILED_WORKSPACES` |
 | Verification fails | Fixer runs with failures + Jest output, up to `AI_MAX_FIX_ATTEMPTS`; then `failed` |
+| AI edits a source/config file | Blocked by the writer's permission rules; anything that still gets through is reverted by git before each verification and listed in the PR; the verifier rejects whatever a restore missed |
+| Tests pass once but not on a re-run (flaky) | "Tests are not stable across runs" → fix round with every run's output |
+| AI spend or deadline exhausted | Job `failed` with "AI budget exceeded: spent $x of $y" or "Job deadline exceeded", checked before AI calls and on phase changes |
 | External process hangs | Killed (whole process group) after `PROCESS_TIMEOUT_MS` / `AI_TIMEOUT_MS` |
 | Worker crashes / is killed | Lease expires; reaper (on startup and every lease/2) requeues, or fails after `JOB_MAX_ATTEMPTS`; the retry clones into a fresh per-attempt workspace |
 | Worker paused, job reassigned | Heartbeat reports "lost" or the next save hits a version conflict → job abandoned by the stale worker |
