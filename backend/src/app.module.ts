@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
-import { HealthController } from './interface/http/health.controller';
+import { ConfigModule } from './composition/config.module';
+import { HttpModule } from './composition/http.module';
 
+/** The API process. */
 @Module({
-  controllers: [HealthController],
+  imports: [ConfigModule, HttpModule],
 })
 export class AppModule {}

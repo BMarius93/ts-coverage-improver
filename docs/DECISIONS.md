@@ -155,3 +155,81 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
 - **Decision:** The pipeline deletes `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` from the clone, passes the
   removed paths to the verifier as expected deletions, and commits only the verified test files by name
   (never `git add -A`), so these deletions never reach the PR.
+
+---
+
+## Phase 3 — scan pipeline (git + Jest coverage adapters)
+
+### ADR-3.1 One safe spawn helper for every external process
+- **Decision:** `infrastructure/process/run-process.ts`: `spawn` with `shell: false` (arguments are never
+  interpreted), `detached: true` (own process group), an explicit environment, a hard timeout that sends
+  SIGTERM then SIGKILL to the **whole group** (npx → node → jest workers), stdout/stderr tail buffers
+  (1 MiB) so a chatty process cannot exhaust memory. Tests prove a grandchild dies on timeout.
+- **Alternatives:** `execa` (one more dependency), `exec` (shell injection risk).
+
+### ADR-3.2 Children get an allow-listed environment
+- **Decision:** `childEnv()` copies only `PATH, HOME, USER, LOGNAME, LANG, LC_ALL, TMPDIR, TZ, SHELL, TERM` plus
+  explicit extras. `GITHUB_TOKEN` and anything else is dropped. A test spawns a child and asserts it cannot
+  read `GITHUB_TOKEN`.
+
+### ADR-3.3 `git` CLI instead of simple-git; token via `GIT_CONFIG_*` env
+- **Context:** CLAUDE.md allows simple-git or spawning git. The token must never be in argv, the remote URL
+  or `.git/config`.
+- **Decision:** Spawn `git` through the safe helper. For clone/push only, pass
+  `GIT_CONFIG_COUNT=1, GIT_CONFIG_KEY_0=http.https://github.com/.extraheader,
+  GIT_CONFIG_VALUE_0=AUTHORIZATION: basic <base64(x-access-token:TOKEN)>` (git ≥ 2.31). The header is scoped to
+  `https://github.com/`, so it is never sent to any other host. `GIT_TERMINAL_PROMPT=0` prevents hangs.
+  `git -c` was rejected because it puts the token in argv (visible in `ps`).
+- **Consequences:** No extra dependency, same timeout/kill guarantees as every other process. A test asserts
+  the token is not in `.git/config`.
+
+### ADR-3.4 Shallow clone, explicit commit list, `--no-verify`
+- **Decision:** `git clone --depth 1 --single-branch --no-tags`; the default branch is whatever the clone
+  checked out (`rev-parse --abbrev-ref HEAD`). Commits stage exactly the verified files (`git add -- <files>`)
+  and use `--no-verify` so the target repo's hooks are not run.
+
+### ADR-3.5 Jest runner details
+- **Decision:**
+  - Install: `npm ci --ignore-scripts` if `package-lock.json` exists, else `npm install --ignore-scripts
+    --no-package-lock`. `--ignore-scripts` because the clone is untrusted code.
+  - Jest is the repo's own (`npx --no-install jest`, configurable as `JEST_COMMAND`), with
+    `--ci --coverageThreshold={}` so the target's own thresholds do not turn measurements into failures.
+  - Reports go to a **temp directory outside the clone** (`--coverageDirectory`), so they never appear in
+    `git status` (which the verifier inspects).
+  - Scan: `--collectCoverageFrom=$COVERAGE_SOURCE_GLOB` minus `*.d.ts`, `*.test.ts`, `*.spec.ts`,
+    `node_modules`; `json-summary` reporter. Exit code ≠ 0 still yields a snapshot (tests may fail while
+    coverage is still meaningful).
+  - Per file (before/after): `--findRelatedTests <target> --collectCoverageFrom=<target>` with `json-summary`
+    + `json`. **Deviation from CLAUDE.md** (`jest <testFile>`): `findRelatedTests` runs *all* tests importing
+    the target, so "before" reflects existing tests and "after" includes the new file — the same command for
+    both, hence comparable numbers. Missing report → coverage `null` (treated as 0% before).
+  - Percentages are computed from `covered/total` counts (istanbul reports `pct: "Unknown"` for empty files).
+  - Uncovered lines come from `coverage-final.json` statement maps (`s[id] === 0`).
+  - Paths are made repo-relative after `realpath` (macOS `/var` → `/private/var`).
+- **Known effect:** barrel files (`index.ts` with only re-exports) show up with low coverage because the
+  scan glob overrides the target's own `collectCoverageFrom`.
+
+### ADR-3.6 Workspaces
+- **Decision:** `WORKSPACE_DIR/{scans,jobs}/<id>`; ids are sanitised; `remove`/`removePaths` refuse any path
+  outside the root (defence against a bug turning into `rm -rf` somewhere else).
+
+### ADR-3.7 Config with zod; `.env` loaded with `process.loadEnvFile`
+- **Decision:** `loadConfig()` validates every variable and reports all problems at once. Trailing `# comments`
+  (present in `.env.example`) and empty values are tolerated. Node 22's `process.loadEnvFile` replaces dotenv.
+  Two extra, test-oriented variables: `GIT_CLONE_BASE_URL` (default `https://github.com`) and `JEST_COMMAND`;
+  plus `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` for the bot's commits.
+
+### ADR-3.8 Composition root in `src/composition`
+- **Decision:** Nest modules (`ConfigModule`, `PersistenceModule`, `AdaptersModule`, `ApplicationModule`,
+  `HttpModule`) bind adapters to port tokens and build use cases with `useFactory`. Controllers are thin:
+  zod DTO pipe → use case → `unwrapOrThrow` (domain error `code` → HTTP status: VALIDATION 400, NOT_FOUND 404,
+  CONFLICT/ILLEGAL_STATE/CONCURRENCY 409).
+- **Endpoints:** `POST /repositories` (201 new / 200 existing), `GET /repositories`, `GET /repositories/:id`,
+  `POST /repositories/:id/scan` (202), `GET /repositories/:id/files?belowThreshold=true`.
+- `tsconfig` `incremental` was removed: with Nest's `deleteOutDir` it silently skipped emitting files.
+
+### ADR-3.9 Offline e2e with a local bare repository
+- **Decision:** `test/support/fixture-remote.ts` turns `test/fixtures/sample-lib` into a bare repo under a temp
+  dir; e2e sets `GIT_CLONE_BASE_URL=file://…` and `JEST_COMMAND=<backend>/node_modules/.bin/jest` (the fixture
+  has no dependencies, so `npm ci` works offline). The e2e test exercises real git, npm, Jest, SQLite and HTTP.
+- **Dependency:** `supertest` (standard for Nest e2e tests).
