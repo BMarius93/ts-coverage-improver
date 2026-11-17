@@ -269,6 +269,9 @@ export const measurement = (
   testsPassed,
   coverage: lines === null ? null : fileCoverage(file, lines),
   uncoveredLines: lines === null || lines < 100 ? [3, 4] : [],
+  uncoveredBranches: lines === null || lines < 100 ? [{ line: 3, type: 'if', uncoveredPaths: ['else'] }] : [],
+  existingTestFiles: ['src/price.test.ts'],
+  styleExample: "it('works', () => expect(1).toBe(1));",
   output: testsPassed ? 'PASS' : 'FAIL: expected 1 to be 2',
 });
 

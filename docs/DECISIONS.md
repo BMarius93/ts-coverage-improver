@@ -426,3 +426,25 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
   Exposed as `aiCostUsd` and `budget` in `JobView`; the job drawer shows "AI cost: $x.xx of $y budget".
 - **Consequences:** a job that spent its budget on the writer fails at the next phase change even if its tests
   might have verified — deliberate: the limit is a hard stop, and raising the budget is a config change.
+
+### ADR-7.4 Richer AI context, bounded prompt size
+- **Context:** The prompts only carried line numbers. Branch gaps ("else never taken"), the existing tests and the
+  repository's test style are what make generated tests land on the first try.
+- **Decision (data):**
+  - `CoverageReportParser.uncoveredBranches(finalReport, target)` reads istanbul `branchMap`/`b` and returns
+    `{ line, type, uncoveredPaths }` with readable path names (`if`/`else`, `true`/`false`, `case n`,
+    `operand i of n`, `default value`); `describeUncoveredBranch` renders "line 42 if: else path never taken".
+    The line comes from `branchMap[].line` or, as in current istanbul output, `loc.start.line` (a real report
+    captured from the sample fixture is checked in as `test/fixtures/coverage/math-coverage-final.json`).
+  - `TestFileScanner` (infrastructure): `existingTestFiles` = `*.test.ts(x)` next to the target and in a sibling
+    `__tests__`, files named after the target first, max 5; `styleExample` = the smallest test file that actually
+    calls `it(`/`test(` (skipping `node_modules`, `dist`, dot-dirs; at most 5 000 entries visited), cut to 120 lines.
+  - Per the request these three live on `FileMeasurement` (filled by `JestCoverageRunner.measureFile`) and on
+    `TestGenerationContext`; the pipeline uses the baseline measurement. The scan repeats on verification runs —
+    cheap and bounded, accepted for simplicity.
+- **Decision (prompts):** new placeholders `{{uncoveredBranches}}`, `{{existingTestFiles}}`, `{{styleExample}}`
+  in all four templates; every prompt states that the context is only a summary and the agent must read the
+  target, its imports and the existing tests itself. The fixer also gets guidance for flaky tests (ADR-7.1).
+- **Decision (size cap):** `PromptTemplates.renderWithinLimit` keeps a prompt ≤ `MAX_PROMPT_CHARS` (30 000) by
+  shortening values in order — style example, then test output, then the branch list — with a visible
+  "truncated" marker; the fixed instructions are never cut.

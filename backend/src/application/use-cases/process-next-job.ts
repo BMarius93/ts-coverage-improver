@@ -165,6 +165,9 @@ export class ProcessNextJob {
       suggestedTestFile: job.targetFile.defaultTestFile(),
       coverage: before.coverage,
       uncoveredLines: before.uncoveredLines,
+      uncoveredBranches: before.uncoveredBranches,
+      existingTestFiles: before.existingTestFiles,
+      styleExample: before.styleExample,
     };
 
     const plan = await this.planAndWrite(state, context);

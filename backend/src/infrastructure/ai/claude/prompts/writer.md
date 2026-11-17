@@ -9,6 +9,23 @@ Write tests for `{{targetFile}}` in `{{testFile}}` following this plan:
 - Current line coverage of the target: {{coverage}}
 - Uncovered lines: {{uncoveredLines}}
 
+Branches no test takes yet:
+
+{{uncoveredBranches}}
+
+Existing test files for this module:
+
+{{existingTestFiles}}
+
+Example of this repository's test conventions:
+
+```ts
+{{styleExample}}
+```
+
+The context above is a summary only: read `{{targetFile}}`, the modules it imports and the existing tests yourself
+before writing.
+
 ## Rules
 
 - Create or edit **only** `{{testFile}}`. Never modify source files, configuration, `package.json` or other tests (such edits are blocked or reverted).

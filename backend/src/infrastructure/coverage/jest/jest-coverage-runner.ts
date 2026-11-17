@@ -11,6 +11,7 @@ import { FilePath } from '../../../domain/coverage/file-path';
 import { childEnv } from '../../process/child-env';
 import { ProcessError, ProcessResult, runProcess, runProcessOrThrow, tail } from '../../process/run-process';
 import { CoverageFinalJson, CoverageReportParser, CoverageSummaryJson } from './coverage-report-parser';
+import { TestFileScanner } from './test-file-scanner';
 
 export interface JestCoverageRunnerOptions {
   /** e.g. `npx --no-install jest`; split on whitespace, never run through a shell. */
@@ -27,7 +28,10 @@ const OUTPUT_TAIL_CHARS = 8000;
  * `npm` and `jest` run with a minimal environment and `--ignore-scripts`: the cloned code is untrusted.
  */
 export class JestCoverageRunner implements CoverageRunnerPort {
-  constructor(private readonly options: JestCoverageRunnerOptions) {}
+  constructor(
+    private readonly options: JestCoverageRunnerOptions,
+    private readonly scanner = new TestFileScanner(),
+  ) {}
 
   async installDependencies(dir: string): Promise<void> {
     const args = existsSync(join(dir, 'package-lock.json'))
@@ -73,18 +77,30 @@ export class JestCoverageRunner implements CoverageRunnerPort {
         '--passWithNoTests',
       ]);
       const output = tail(`${result.stdout}\n${result.stderr}`, OUTPUT_TAIL_CHARS);
+      const context = {
+        existingTestFiles: await this.scanner.existingTestFiles(dir, targetFile),
+        styleExample: await this.scanner.styleExample(dir),
+      };
+      const testsPassed = result.exitCode === 0;
       const summaryPath = join(reportDir, 'coverage-summary.json');
       if (!existsSync(summaryPath)) {
-        return { testsPassed: result.exitCode === 0, coverage: null, uncoveredLines: [], output };
+        return { testsPassed, coverage: null, uncoveredLines: [], uncoveredBranches: [], output, ...context };
       }
       const parser = new CoverageReportParser(dir);
       const summary = await this.readJson<CoverageSummaryJson>(summaryPath, result);
       const coverage = parser.parseSummary(summary).find((file) => file.path.equals(targetFile)) ?? null;
       const finalPath = join(reportDir, 'coverage-final.json');
-      const uncoveredLines = existsSync(finalPath)
-        ? parser.uncoveredLines(await this.readJson<CoverageFinalJson>(finalPath, result), targetFile)
-        : [];
-      return { testsPassed: result.exitCode === 0, coverage, uncoveredLines, output };
+      const finalReport = existsSync(finalPath)
+        ? await this.readJson<CoverageFinalJson>(finalPath, result)
+        : {};
+      return {
+        testsPassed,
+        coverage,
+        uncoveredLines: parser.uncoveredLines(finalReport, targetFile),
+        uncoveredBranches: parser.uncoveredBranches(finalReport, targetFile),
+        output,
+        ...context,
+      };
     });
   }
 

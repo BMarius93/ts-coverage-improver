@@ -3,6 +3,7 @@ import { isAbsolute, relative, sep } from 'node:path';
 import { CoveragePercentage } from '../../../domain/coverage/coverage-percentage';
 import { FileCoverage } from '../../../domain/coverage/file-coverage';
 import { FilePath } from '../../../domain/coverage/file-path';
+import { UncoveredBranch } from '../../../application/ports/coverage-runner.port';
 
 interface Counter {
   total: number;
@@ -22,6 +23,8 @@ export type CoverageSummaryJson = Record<string, SummaryEntry>;
 interface FinalEntry {
   statementMap: Record<string, { start: { line: number }; end: { line: number } }>;
   s: Record<string, number>;
+  branchMap?: Record<string, { type: string; line?: number; loc?: { start: { line: number } } }>;
+  b?: Record<string, number[]>;
 }
 
 /** `coverage-final.json` (json reporter): istanbul file coverage keyed by absolute path. */
@@ -65,7 +68,7 @@ export class CoverageReportParser {
 
   /** Line numbers that contain at least one statement that never ran. */
   uncoveredLines(finalReport: CoverageFinalJson, target: FilePath): number[] {
-    const entry = Object.entries(finalReport).find(([file]) => this.toFilePath(file)?.equals(target))?.[1];
+    const entry = this.entryFor(finalReport, target);
     if (!entry) return [];
     const lines = new Set<number>();
     for (const [id, count] of Object.entries(entry.s)) {
@@ -75,6 +78,31 @@ export class CoverageReportParser {
       }
     }
     return [...lines].sort((a, b) => a - b);
+  }
+
+  /** Branch points where at least one path was never taken, ordered by line. */
+  uncoveredBranches(finalReport: CoverageFinalJson, target: FilePath): UncoveredBranch[] {
+    const entry = this.entryFor(finalReport, target);
+    if (!entry?.branchMap || !entry.b) return [];
+    const branches: UncoveredBranch[] = [];
+    for (const [id, branch] of Object.entries(entry.branchMap)) {
+      const counts = entry.b[id] ?? [];
+      const uncoveredPaths = counts
+        .map((count, index) => (count === 0 ? pathName(branch.type, index, counts.length) : null))
+        .filter((name): name is string => name !== null);
+      if (uncoveredPaths.length > 0) {
+        branches.push({
+          line: branch.line ?? branch.loc?.start.line ?? 0,
+          type: branch.type,
+          uncoveredPaths,
+        });
+      }
+    }
+    return branches.sort((a, b) => a.line - b.line);
+  }
+
+  private entryFor(finalReport: CoverageFinalJson, target: FilePath): FinalEntry | undefined {
+    return Object.entries(finalReport).find(([file]) => this.toFilePath(file)?.equals(target))?.[1];
   }
 
   private toFilePath(file: string): FilePath | null {
@@ -90,6 +118,31 @@ export class CoverageReportParser {
     const result = FilePath.create(rel.split(sep).join('/'));
     return result.ok ? result.value : null;
   }
+}
+
+/** Names the n-th path of an istanbul branch so a model (and a human) can tell which side is missing. */
+function pathName(type: string, index: number, total: number): string {
+  switch (type) {
+    case 'if':
+      return index === 0 ? 'if' : 'else';
+    case 'cond-expr':
+      return index === 0 ? 'true' : 'false';
+    case 'binary-expr':
+      return `operand ${index + 1} of ${total}`;
+    case 'switch':
+      return `case ${index + 1}`;
+    case 'default-arg':
+      return 'default value';
+    default:
+      return `path ${index + 1}`;
+  }
+}
+
+/** "line 42 if: else path never taken" */
+export function describeUncoveredBranch(branch: UncoveredBranch): string {
+  const paths = branch.uncoveredPaths.join(', ');
+  const noun = branch.uncoveredPaths.length === 1 ? 'path' : 'paths';
+  return `line ${branch.line} ${branch.type}: ${paths} ${noun} never taken`;
 }
 
 /** Compresses [1,2,3,7,9,10] into "1-3, 7, 9-10" for prompts and logs. */

@@ -12,6 +12,9 @@ describe('PromptTemplates', () => {
     plan: 'PLAN',
     failures: '- FAIL',
     testOutput: 'OUTPUT',
+    uncoveredBranches: '- line 42 if: else path never taken',
+    existingTestFiles: '- `src/a.test.ts`',
+    styleExample: "it('STYLE', () => {});",
   };
 
   it.each<PromptName>(['planner', 'writer', 'fixer', 'single'])(

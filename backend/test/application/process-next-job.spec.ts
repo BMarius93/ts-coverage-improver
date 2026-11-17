@@ -78,6 +78,18 @@ describe('ProcessNextJob', () => {
       expect(h.leaseKeeper.stopped).toBe(1);
     });
 
+    it('gives the AI the uncovered branches, existing tests and a style example from the baseline run', async () => {
+      const h = await setup();
+      const plan = jest.spyOn(h.ai, 'plan');
+      await h.processNextJob.execute('worker-1');
+      expect(plan.mock.calls[0][0]).toMatchObject({
+        uncoveredLines: [3, 4],
+        uncoveredBranches: [{ line: 3, type: 'if', uncoveredPaths: ['else'] }],
+        existingTestFiles: ['src/price.test.ts'],
+        styleExample: "it('works', () => expect(1).toBe(1));",
+      });
+    });
+
     it('uses the planned test file as the writer target', async () => {
       const h = await setup();
       h.ai.testPlan = plan('src/__tests__/price.test.ts');

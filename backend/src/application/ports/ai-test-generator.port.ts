@@ -1,6 +1,7 @@
 import { FileCoverage } from '../../domain/coverage/file-coverage';
 import { FilePath } from '../../domain/coverage/file-path';
 import { TestPlan } from '../../domain/job/test-plan';
+import { UncoveredBranch } from './coverage-runner.port';
 
 export interface TestGenerationContext {
   workspaceDir: string;
@@ -9,6 +10,11 @@ export interface TestGenerationContext {
   suggestedTestFile: FilePath;
   coverage: FileCoverage | null;
   uncoveredLines: number[];
+  uncoveredBranches: UncoveredBranch[];
+  /** Existing tests for the target (repo-relative), to extend rather than duplicate. */
+  existingTestFiles: string[];
+  /** A short existing test file of the repository, to match its conventions; null if there is none. */
+  styleExample: string | null;
 }
 
 /** Per-call limits, set by the pipeline from the job's remaining budget. */

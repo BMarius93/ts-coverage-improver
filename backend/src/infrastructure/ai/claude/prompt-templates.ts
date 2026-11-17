@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+const TRUNCATION_MARKER = '\n… (truncated to fit the prompt size limit)';
+
 export type PromptName = 'planner' | 'writer' | 'fixer' | 'single';
 
 /** Loads `prompts/<name>.md` and fills `{{placeholders}}`. Unknown placeholders are an error (typo guard). */
@@ -18,6 +20,29 @@ export class PromptTemplates {
       }
       return value;
     });
+  }
+
+  /**
+   * Renders and keeps the prompt within `maxChars` by shortening the values named in `shrinkOrder` (first one
+   * first, from the end), down to a short marker. Fixed instructions are never cut.
+   */
+  renderWithinLimit(
+    name: PromptName,
+    values: Record<string, string>,
+    maxChars: number,
+    shrinkOrder: string[],
+  ): string {
+    const current = { ...values };
+    let text = this.render(name, current);
+    for (const key of shrinkOrder) {
+      const excess = text.length - maxChars;
+      if (excess <= 0) break;
+      const value = current[key] ?? '';
+      const keep = value.length - excess - TRUNCATION_MARKER.length;
+      current[key] = keep > 0 ? `${value.slice(0, keep)}${TRUNCATION_MARKER}` : TRUNCATION_MARKER.trim();
+      text = this.render(name, current);
+    }
+    return text;
   }
 
   private load(name: PromptName): string {

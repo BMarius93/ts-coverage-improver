@@ -8,7 +8,7 @@ import {
 } from '../../../application/ports/ai-test-generator.port';
 import { LoggerPort } from '../../../application/ports/logger.port';
 import { TestPlan } from '../../../domain/job/test-plan';
-import { formatLineRanges } from '../../coverage/jest/coverage-report-parser';
+import { describeUncoveredBranch, formatLineRanges } from '../../coverage/jest/coverage-report-parser';
 import { childEnv } from '../../process/child-env';
 import { ProcessError, runProcess, tail } from '../../process/run-process';
 import { AiOutputError, ClaudeResult, extractTestPlan, parseClaudeResult } from './claude-output';
@@ -34,6 +34,9 @@ const CLAUDE_ENV_ALLOW_LIST = [
   'CLAUDE_CONFIG_DIR',
   'XDG_CONFIG_HOME',
 ];
+
+/** Hard cap on the prompt we send (instructions + context); see PromptTemplates.renderWithinLimit. */
+export const MAX_PROMPT_CHARS = 30_000;
 
 const READ_ONLY_TOOLS = 'Read,Grep,Glob';
 const WRITER_TOOLS = 'Read,Grep,Glob,Write,Edit,Bash';
@@ -162,14 +165,29 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
   }
 
   private prompt(name: PromptName, context: TestGenerationContext, extra: Record<string, string>): string {
-    return this.prompts.render(name, {
-      targetFile: context.targetFile.value,
-      testFile: context.suggestedTestFile.value,
-      coverage: context.coverage ? context.coverage.lines.toString() : '0% (no test imports this file yet)',
-      uncoveredLines:
-        context.uncoveredLines.length > 0 ? formatLineRanges(context.uncoveredLines) : 'unknown',
-      ...extra,
-    });
+    return this.prompts.renderWithinLimit(
+      name,
+      {
+        targetFile: context.targetFile.value,
+        testFile: context.suggestedTestFile.value,
+        coverage: context.coverage ? context.coverage.lines.toString() : '0% (no test imports this file yet)',
+        uncoveredLines:
+          context.uncoveredLines.length > 0 ? formatLineRanges(context.uncoveredLines) : 'unknown',
+        uncoveredBranches:
+          context.uncoveredBranches.length > 0
+            ? context.uncoveredBranches.map((branch) => `- ${describeUncoveredBranch(branch)}`).join('\n')
+            : '- none reported',
+        existingTestFiles:
+          context.existingTestFiles.length > 0
+            ? context.existingTestFiles.map((file) => `- \`${file}\``).join('\n')
+            : '- none yet',
+        styleExample: context.styleExample ?? '// (no existing test files in this repository)',
+        ...extra,
+      },
+      MAX_PROMPT_CHARS,
+      // Least valuable first: the style example, then raw test output, then the branch list.
+      ['styleExample', 'testOutput', 'uncoveredBranches'],
+    );
   }
 
   private async run(

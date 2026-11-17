@@ -5,7 +5,11 @@ import {
   AiCallFailedError,
   TestGenerationContext,
 } from '../../../src/application/ports/ai-test-generator.port';
-import { ClaudeCliAdapter, ClaudeCliOptions } from '../../../src/infrastructure/ai/claude/claude-cli.adapter';
+import {
+  ClaudeCliAdapter,
+  ClaudeCliOptions,
+  MAX_PROMPT_CHARS,
+} from '../../../src/infrastructure/ai/claude/claude-cli.adapter';
 import { fileCoverage, path, plan } from '../../support/builders';
 import { RecordingLogger } from '../../support/fakes';
 
@@ -80,6 +84,9 @@ describe('ClaudeCliAdapter', () => {
       suggestedTestFile: path('src/price.test.ts'),
       coverage: fileCoverage('src/price.ts', 12.5),
       uncoveredLines: [3, 4, 5, 9],
+      uncoveredBranches: [{ line: 42, type: 'if', uncoveredPaths: ['else'] }],
+      existingTestFiles: ['src/price.test.ts'],
+      styleExample: "it('style example', () => {});",
     };
   });
   afterEach(() => {
@@ -121,6 +128,9 @@ describe('ClaudeCliAdapter', () => {
       expect(call.stdin).toContain('`src/price.ts`');
       expect(call.stdin).toContain('12.50%');
       expect(call.stdin).toContain('3-5, 9');
+      expect(call.stdin).toContain('- line 42 if: else path never taken');
+      expect(call.stdin).toContain('- `src/price.test.ts`');
+      expect(call.stdin).toContain("it('style example', () => {});");
       // Secrets: the AI CLI never sees GITHUB_TOKEN, but does get its own credentials.
       expect(call.env.GITHUB_TOKEN).toBeUndefined();
       expect(call.env.ANTHROPIC_API_KEY).toBe('sk-test');
@@ -240,6 +250,21 @@ describe('ClaudeCliAdapter', () => {
       ).rejects.toThrow(/writer failed/);
     });
 
+    it('keeps the prompt within the size cap by truncating the style example first', async () => {
+      const cli = fakeCli(dir, { stdout: result({ result: 'fixed' }) });
+      await new ClaudeCliAdapter(options(cli), new RecordingLogger()).fix(
+        { ...context, styleExample: 'x'.repeat(50_000) },
+        plan(),
+        ['Tests are failing.'],
+        'Received: 3',
+        LIMITS,
+      );
+      const { stdin } = recorded();
+      expect(stdin.length).toBeLessThanOrEqual(MAX_PROMPT_CHARS);
+      expect(stdin).toContain('Received: 3');
+      expect(stdin).toContain('(truncated to fit the prompt size limit)');
+    });
+
     it('feeds verification failures and test output to the fixer', async () => {
       const cli = fakeCli(dir, { stdout: result({ result: 'fixed' }) });
       await new ClaudeCliAdapter(options(cli), new RecordingLogger()).fix(
@@ -258,7 +283,14 @@ describe('ClaudeCliAdapter', () => {
     it('returns the plan reported by the single-call mode', async () => {
       const cli = fakeCli(dir, { stdout: result({ result: PLAN_JSON }) });
       const { plan: testPlan } = await new ClaudeCliAdapter(options(cli), new RecordingLogger()).planAndWrite(
-        { ...context, coverage: null, uncoveredLines: [] },
+        {
+          ...context,
+          coverage: null,
+          uncoveredLines: [],
+          uncoveredBranches: [],
+          existingTestFiles: [],
+          styleExample: null,
+        },
         LIMITS,
       );
       expect(testPlan.testFile.value).toBe('src/price.test.ts');
@@ -266,6 +298,9 @@ describe('ClaudeCliAdapter', () => {
       expect(flag(call.argv, '--permission-mode')).toBe('dontAsk');
       expect(call.stdin).toContain('0% (no test imports this file yet)');
       expect(call.stdin).toContain('Uncovered lines: unknown');
+      expect(call.stdin).toContain('- none reported');
+      expect(call.stdin).toContain('- none yet');
+      expect(call.stdin).toContain('(no existing test files in this repository)');
     });
   });
 });
