@@ -15,8 +15,24 @@ frontend/   Vite + React dashboard
 docs/       ARCHITECTURE.md (Mermaid diagrams), DECISIONS.md (ADRs per phase), GLOSSARY.md, PLAN.md
 ```
 
-Demo target used during development: [`coverage-demo-target`](../coverage-demo-target) — a small TS library
-(date parser, price calculator, validators, TTL cache, HTTP-client service) with 0–32 % line coverage per file.
+Demo target used during development: [`BMarius93/coverage-demo-target`](https://github.com/BMarius93/coverage-demo-target)
+— a small TS library (date parser, price calculator, validators, TTL cache, HTTP-client service) with 0–32 % line
+coverage per file.
+
+## Example pull requests
+
+Opened end to end by this service against the demo target:
+
+| File | Line coverage | PR |
+|---|---|---|
+| `src/ttl-cache.ts` | 0 % → 100 % | [coverage-demo-target#2](https://github.com/BMarius93/coverage-demo-target/pull/2) |
+| `src/price-calculator.ts` | 13.64 % → 100 % | [coverage-demo-target#3](https://github.com/BMarius93/coverage-demo-target/pull/3) |
+
+## Use of AI while building this
+
+In line with the assessment's AI policy, this project was built with Claude Code. `CLAUDE.md` (project brief and
+architecture rules) and `docs/PLAN.md` (phase-by-phase build plan) are the instructions it worked from; every design
+decision and its trade-offs are recorded in `docs/DECISIONS.md`. All code was reviewed, run and tested by me.
 
 ---
 
