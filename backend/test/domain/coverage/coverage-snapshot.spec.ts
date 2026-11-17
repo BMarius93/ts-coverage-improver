@@ -49,9 +49,9 @@ describe('CoverageAnalyzer', () => {
       ['src/types.d.ts', 0],
       ['src/a.ts', 10],
     ]);
-    expect(analyzer.filesNeedingImprovement(snap, CoverageThreshold.default()).map((f) => f.path.value)).toEqual([
-      'src/a.ts',
-    ]);
+    expect(
+      analyzer.filesNeedingImprovement(snap, CoverageThreshold.default()).map((f) => f.path.value),
+    ).toEqual(['src/a.ts']);
   });
 
   it('tells whether a single file needs improvement', () => {

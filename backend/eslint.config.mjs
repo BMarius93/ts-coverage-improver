@@ -77,6 +77,8 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/unbound-method': 'off',
       '@typescript-eslint/require-await': 'off',
+      // expect.any() / expect.stringContaining() are typed as any
+      '@typescript-eslint/no-unsafe-assignment': 'off',
     },
   },
 );

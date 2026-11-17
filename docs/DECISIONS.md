@@ -88,3 +88,70 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
 - **Decision:** Relative POSIX paths only; no `..`/`.`/empty segments, no leading `-`, only `.ts`/`.tsx`,
   a conservative character allow-list.
 - **Consequences:** Paths can be safely joined to the workspace and passed as CLI arguments to Jest/git.
+
+---
+
+## Phase 2 — persistence + application layer
+
+### ADR-2.1 Ports are interfaces + Symbol tokens in `application/ports`
+- **Decision:** `GitPort`, `WorkspacePort`, `CoverageRunnerPort`, `AiTestGeneratorPort`, `PullRequestPort`,
+  `JobQueuePort`, `LeaseKeeperPort`, `LoggerPort`. Each file exports its interface and a `Symbol` token for Nest.
+  Domain repository interfaces stay in `domain/*` (they speak the domain's language); their tokens live in
+  `application/tokens.ts` so the domain has no DI concerns.
+- **Consequences:** Use cases depend on interfaces only and are unit-tested with in-memory fakes
+  (`test/support/fakes.ts`).
+
+### ADR-2.2 Use cases return read models (views), not aggregates
+- **Decision:** `application/views.ts` maps aggregates to plain JSON-ready objects (`RepositoryView`,
+  `FileView`, `JobView`). Controllers never see domain objects.
+- **Consequences:** The HTTP shape is stable even when aggregates change.
+
+### ADR-2.3 Scans run in the background with state on the aggregate
+- **Decision:** `ScanCoverage.execute` validates, marks the repository `scanning`, persists, and returns
+  a `completion` promise that never rejects (the controller ignores it; tests await it). Failure is recorded
+  on the aggregate (`failScan`). The scan workspace is always removed.
+- **Alternatives:** run scans through the job queue (more robust, more code); synchronous scan in the request
+  (simple, but HTTP timeouts on large repos).
+- **Consequences:** A process crash leaves `scanning` behind — `RecoverStaleJobs` marks scans older than
+  `maxScanDurationMs` (2× `PROCESS_TIMEOUT_MS`) as failed. Two simultaneous scan requests in the same tick
+  could both pass the `isScanning` check (no version on Repository) — acceptable for a single-user tool.
+
+### ADR-2.4 SQLite claim: domain logic inside `BEGIN IMMEDIATE`
+- **Context:** CLAUDE.md sketches a single `UPDATE … RETURNING`. That would duplicate the aggregate's `start()`
+  logic (timeline, branch name, attempts) in SQL.
+- **Decision:** `SqliteJobQueue.claimNext` runs a `BEGIN IMMEDIATE` transaction (better-sqlite3
+  `transaction().immediate()`): select the oldest queued job of a repository with no running job (the same
+  `NOT EXISTS` query), call `job.start()`, write it with the optimistic version check, set `lease_until`.
+  The write lock is held from the first statement, so no other connection/process can interleave.
+- **Backstops:** partial unique indexes `one_running_job_per_repo` and `one_active_job_per_file`.
+- **Verification:** an integration test spawns 6 OS processes that race to claim 9 jobs across 3 repos; it
+  asserts one running job per repo and no double claims. With a deferred transaction the test fails
+  (`SQLITE_BUSY`), so it really exercises the locking.
+
+### ADR-2.5 Lease is a column owned by the queue
+- **Decision:** `lease_until` (epoch ms) is written by `claimNext`/`extendLease` only. `save()` keeps it while
+  the job is running and clears it otherwise. `extendLease` matches on `worker_id` and `status='running'`, so a
+  worker can never extend a lease it no longer owns.
+
+### ADR-2.6 Pipeline failures fail the job; crashes are retried
+- **Decision:** Any error inside `ProcessNextJob` (clone, npm, AI, verification, push, PR) marks the job
+  `failed` with the phase it failed in; the user can request a new job. Only *crashes/hangs* (expired lease)
+  are retried by the reaper, up to `JOB_MAX_ATTEMPTS`. A lost lease (`LeaseLostError`) or a stale write
+  (`ConcurrencyConflictError`) makes the worker *abandon* the job without writing anything.
+- **Alternatives:** automatic retry with backoff for transient errors (network) — future improvement.
+- **Consequences:** No double PRs from duplicate workers; failure reasons are visible in the dashboard.
+
+### ADR-2.7 Retried jobs are idempotent towards GitHub
+- **Decision:** The branch name is derived from the job id (stable across attempts), push is `--force` to that
+  job-owned branch, and `PullRequestPort.open` returns the existing open PR for the same head if there is one.
+- **Consequences:** A crash between "push" and "save completed" cannot create duplicate PRs.
+
+### ADR-2.8 Coverage before/after measured with the same command
+- **Decision:** `CoverageRunnerPort.measureFile` is used for both measurements (Phase 3 implements it with
+  `jest --findRelatedTests <target>`), so before/after numbers are comparable. If Jest reports nothing for the
+  file (no test imports it), "before" is 0%.
+
+### ADR-2.9 Workspace hardening deletions are expected by the verifier
+- **Decision:** The pipeline deletes `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` from the clone, passes the
+  removed paths to the verifier as expected deletions, and commits only the verified test files by name
+  (never `git add -A`), so these deletions never reach the PR.

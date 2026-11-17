@@ -18,7 +18,13 @@ export class CoveragePercentage {
 
   /** Builds a percentage from covered/total counts; a file with nothing to cover counts as 100%. */
   static fromCounts(covered: number, total: number): Result<CoveragePercentage, ValidationError> {
-    if (!Number.isInteger(covered) || !Number.isInteger(total) || covered < 0 || total < 0 || covered > total) {
+    if (
+      !Number.isInteger(covered) ||
+      !Number.isInteger(total) ||
+      covered < 0 ||
+      total < 0 ||
+      covered > total
+    ) {
       return err(new ValidationError(`Invalid coverage counts ${covered}/${total}`));
     }
     return CoveragePercentage.create(total === 0 ? 100 : (covered / total) * 100);

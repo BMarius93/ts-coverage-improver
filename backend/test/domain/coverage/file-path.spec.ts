@@ -40,7 +40,9 @@ describe('FilePath', () => {
 
   it('derives a branch-safe slug', () => {
     expect(path('src/Utils/Date_Parser.ts').slug()).toBe('src-utils-date-parser');
-    expect(path('src/a-very-long-directory-name/another-long-file-name.ts').slug(20)).toBe('src-a-very-long-dire');
+    expect(path('src/a-very-long-directory-name/another-long-file-name.ts').slug(20)).toBe(
+      'src-a-very-long-dire',
+    );
     expect(path('src/___.ts').slug()).toBe('src');
     expect(path('_.ts').slug()).toBe('file');
   });
