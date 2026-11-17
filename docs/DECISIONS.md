@@ -303,3 +303,37 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
 - **Context:** a flaky test revealed that better-sqlite3's native addon keeps the `SqliteError` class from the
   first JS realm that loaded it (Jest module registries), so `instanceof Error` can be false.
 - **Decision:** detect unique violations by `error.code`, pass errors through unchanged.
+
+---
+
+## Phase 5 — React dashboard
+
+### ADR-5.1 Vite + React 19 + TypeScript, no UI framework, no state library
+- **Decision:** One page (`App.tsx`) with small components: `AddRepositoryForm`, `RepositoryList`,
+  `FilesTable` (+ `CoverageBar`, `JobBadge`), `JobDrawer`. Plain CSS with a few custom properties. Server
+  state is fetched by a single `refresh()`; no React Query/Redux — the data set is small and polling is simple.
+- **Versions:** Vite 8, `@vitejs/plugin-react` 6, React 19, TypeScript 5.9 (same pin as the backend).
+
+### ADR-5.2 Adaptive polling
+- **Decision:** `usePolling` re-schedules after each refresh completes (never overlapping). `pollInterval()`
+  returns 2.5 s while any scan is running or any visible/open job is queued/running, otherwise 15 s (to pick up
+  changes made from another tab or by the API). The open job drawer refreshes with the same tick.
+- **Alternatives:** Server-Sent Events/WebSockets (push, more moving parts; good future improvement).
+
+### ADR-5.3 Same-origin API through the Vite proxy
+- **Decision:** The client calls `/api/*`; the Vite dev server proxies to `API_URL` (default
+  `http://localhost:3000`) and strips `/api`. `VITE_API_URL` can point the built app elsewhere; the backend
+  also enables CORS for `CORS_ORIGIN`.
+
+### ADR-5.4 UX details
+- Coverage bar coloured relative to the repository threshold (red < threshold/2 ≤ amber < threshold ≤ green)
+  with a threshold marker. "Only files below threshold" (default on) uses the backend's analyzer ordering
+  (lowest first). "Improve" is disabled while a job for the file is active (the backend also returns 409).
+- The job drawer shows status/phase, before → after coverage, attempts and fix rounds, branch, duration,
+  PR link, error, the phase timeline (requeues/failures marked red) and the test plan.
+
+### ADR-5.5 Frontend tests: Vitest on pure logic only
+- **Decision:** `vitest` (the standard runner for Vite projects; new dependency) tests the formatting,
+  classification and polling-interval logic in `lib/format.ts`. Components are kept thin and are verified by
+  `tsc`, ESLint (incl. `react-hooks`) and a manual run; no jsdom/Testing Library to keep dependencies minimal.
+- **Consequences:** UI regressions would be caught manually; component tests are a future improvement.
