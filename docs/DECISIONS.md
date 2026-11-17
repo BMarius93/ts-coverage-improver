@@ -448,3 +448,12 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
 - **Decision (size cap):** `PromptTemplates.renderWithinLimit` keeps a prompt ≤ `MAX_PROMPT_CHARS` (30 000) by
   shortening values in order — style example, then test output, then the branch list — with a visible
   "truncated" marker; the fixed instructions are never cut.
+
+### ADR-7.5 PR body and dashboard show what the job did
+- **Decision (PR body):** `PullRequestDescription` now has a coverage table with **lines and branches**
+  (before/after/change; a branch decrease is shown honestly, since only line coverage is gated), states how many
+  consecutive identical runs verification required (ADR-7.1), lists non-test edits that were reverted (ADR-7.2)
+  and reports the AI cost (ADR-7.3) in the footer. Table cells escape `|` and newlines.
+- **Decision (dashboard):** a file whose latest job completed shows "before → after" line coverage and the PR link
+  directly in its row, not only in the job drawer.
+- **Consequences:** reviewers see cost, stability and any reverted tampering without opening the dashboard.

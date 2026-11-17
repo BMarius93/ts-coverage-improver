@@ -94,7 +94,10 @@ describe('Improvement jobs (e2e: real git, npm, Jest and verifier; scripted AI; 
 
     expect(pullRequests.opened).toHaveLength(1);
     expect(pullRequests.opened[0]).toMatchObject({ head: branch, base: 'main' });
-    expect(pullRequests.opened[0].body).toContain('| 0.00% | 100.00% | +100.00 pp |');
+    expect(pullRequests.opened[0].body).toContain('| Lines | 0.00% | 100.00% | +100.00 pp |');
+    expect(pullRequests.opened[0].body).toContain('| Branches | 0.00% | 100.00% | +100.00 pp |');
+    expect(pullRequests.opened[0].body).toContain('pass in 2 consecutive runs');
+    expect(pullRequests.opened[0].body).toContain('AI cost $0.50');
 
     const files2 = await request(http).get(`/repositories/${repositoryId}/files`).expect(200);
     const strings = (files2.body as Array<{ path: string; latestJob: JobView | null }>).find(
@@ -120,6 +123,7 @@ describe('Improvement jobs (e2e: real git, npm, Jest and verifier; scripted AI; 
     expect(job.error).toBeNull();
     expect(job.status).toBe('completed');
     expect(job.revertedFiles).toEqual(['src/sneaky.ts', 'src/strings.ts']);
+    expect(pullRequests.opened[0].body).toContain('2 non-test edits were made by the AI and reverted');
     expect(ai.calls).toEqual(['plan', 'write']);
     // Only the test reached the remote; the original source is intact there.
     expect(gitOutput(ctx.remote.bareRepo, 'diff', '--name-status', 'main', job.branchName!)).toBe(

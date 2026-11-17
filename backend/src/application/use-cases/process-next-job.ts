@@ -200,8 +200,13 @@ export class ProcessNextJob {
       targetFile: job.targetFile,
       coverageBefore,
       coverageAfter,
+      branchesBefore: before.coverage?.metrics.branches ?? CoveragePercentage.zero(),
+      branchesAfter: measurement.coverage!.metrics.branches,
       plan,
       testFiles,
+      verificationRuns: this.options.verifyRuns,
+      revertedFiles: job.revertedFiles,
+      aiCostUsd: job.aiCostUsd,
     });
     const branch = this.branchOf(job);
     await this.deps.git.commit(dir, testFiles, description.commitMessage);

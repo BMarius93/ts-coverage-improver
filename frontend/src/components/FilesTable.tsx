@@ -69,6 +69,11 @@ export function FilesTable({ repository, files, belowOnly, onToggleBelowOnly, on
                     {job ? (
                       <div className="job-cell">
                         <JobBadge job={job} onClick={() => onOpenJob(job.id)} />
+                        {job.status === 'completed' && (
+                          <span className="coverage-delta" title="Line coverage before → after">
+                            {formatPercent(job.coverageBefore)} → {formatPercent(job.coverageAfter)}
+                          </span>
+                        )}
                         {job.prUrl && (
                           <a href={job.prUrl} target="_blank" rel="noreferrer">
                             PR #{job.prUrl.split('/').pop()}
