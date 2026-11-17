@@ -57,6 +57,10 @@ export function pollInterval(repositories: Repository[], files: FileRow[], openJ
   return busy ? 2500 : 15000;
 }
 
+export function formatUsd(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }

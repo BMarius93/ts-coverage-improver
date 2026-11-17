@@ -403,3 +403,26 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
 - The fixer prompt no longer asks the AI to restore files itself.
 - **Consequences:** an AI that "fixes" the source to make its tests pass now ends up with failing tests
   (against the restored source) and gets a fix round with that feedback, instead of a hard verification failure.
+
+### ADR-7.3 Per-job AI budget and deadline
+- **Context:** `AI_MAX_BUDGET_USD` only capped single calls; a job with a fix loop and retries could spend a
+  multiple of it, and a stuck job had no overall time limit.
+- **Decision (domain):** value object `JobBudget { maxCostUsd, deadline }` and, on `ImprovementJob`,
+  `budget` (nullable) and `aiCostUsd`. `recordAiCost(usd, now)` accumulates (running jobs only, non-negative),
+  `remainingBudgetUsd()`, `budgetViolation(now)` → `'AI budget exceeded' | 'Job deadline exceeded' | null`,
+  `isOverBudget(now)`. Jobs persisted before the migration have no budget, hence no limits.
+- **Decision (deadline):** set at request time (`RequestImprovement` with `JOB_DEADLINE_MS`, default 30 min), so
+  queue time and crash retries count: it bounds how long a user waits for an answer. A job whose deadline passed
+  while queued fails right after the claim, before cloning.
+- **Decision (port):** every `AiTestGeneratorPort` method takes `AiCallLimits { maxBudgetUsd }` and returns
+  `{ costUsd, … }`; `ClaudeCliAdapter` reads `total_cost_usd` and passes
+  `--max-budget-usd = min(job remaining, AI_MAX_BUDGET_USD)`. Errors raised *after* the CLI ran (error result,
+  invalid plan) become `AiCallFailedError` carrying the cost, so failed calls are still accounted for.
+- **Decision (pipeline):** budget is checked at the start of the pipeline, before every AI call and on every
+  phase change; a violation fails the job ("AI budget exceeded: spent $x of $y" / "Job deadline exceeded: …").
+  Claude's `--max-budget-usd` can overshoot slightly within a call, which is why the check after the call matters.
+- **Config:** `AI_JOB_MAX_BUDGET_USD` (default 5), `JOB_DEADLINE_MS` (default 1 800 000); `AI_MAX_BUDGET_USD` stays
+  as the per-call cap. Persisted by migration `003_job_budget.sql` (numbered 003 because ADR-7.2 needed 002).
+  Exposed as `aiCostUsd` and `budget` in `JobView`; the job drawer shows "AI cost: $x.xx of $y budget".
+- **Consequences:** a job that spent its budget on the writer fails at the next phase change even if its tests
+  might have verified — deliberate: the limit is a hard stop, and raising the budget is a config change.

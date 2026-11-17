@@ -1,14 +1,21 @@
 import { FilePath } from '../../domain/coverage/file-path';
 import { ImprovementJob } from '../../domain/job/improvement-job';
 import { ImprovementJobRepository } from '../../domain/job/improvement-job-repository';
+import { JobBudget } from '../../domain/job/job-budget';
 import { JobSchedulingPolicy } from '../../domain/job/job-scheduling-policy';
 import { RepositoryRepository } from '../../domain/repository/repository-repository';
 import { Clock } from '../../domain/shared/clock';
 import { ConflictError, ValidationError } from '../../domain/shared/domain-error';
 import { IdGenerator } from '../../domain/shared/id-generator';
-import { err, ok, Result } from '../../domain/shared/result';
+import { err, ok, Result, unwrap } from '../../domain/shared/result';
 import { NotFoundError } from '../errors';
 import { JobView, toJobView } from '../views';
+
+/** Limits given to every new job (AI_JOB_MAX_BUDGET_USD, JOB_DEADLINE_MS). */
+export interface JobBudgetPolicy {
+  maxCostUsd: number;
+  maxDurationMs: number;
+}
 
 export type RequestImprovementError = ValidationError | NotFoundError | ConflictError;
 
@@ -21,6 +28,7 @@ export class RequestImprovement {
     private readonly jobs: ImprovementJobRepository,
     private readonly ids: IdGenerator,
     private readonly clock: Clock,
+    private readonly budgetPolicy: JobBudgetPolicy,
   ) {}
 
   async execute(input: {
@@ -52,11 +60,16 @@ export class RequestImprovement {
       return allowed;
     }
 
+    const now = this.clock.now();
+    const budget = unwrap(
+      JobBudget.startingAt(now, this.budgetPolicy.maxCostUsd, this.budgetPolicy.maxDurationMs),
+    );
     const job = ImprovementJob.request({
       id: this.ids.next(),
       repositoryId: repository.id,
       targetFile: targetFile.value,
-      now: this.clock.now(),
+      now,
+      budget,
     });
     await this.jobs.save(job);
     return ok(toJobView(job));

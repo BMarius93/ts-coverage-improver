@@ -1,7 +1,10 @@
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TestGenerationContext } from '../../../src/application/ports/ai-test-generator.port';
+import {
+  AiCallFailedError,
+  TestGenerationContext,
+} from '../../../src/application/ports/ai-test-generator.port';
 import { ClaudeCliAdapter, ClaudeCliOptions } from '../../../src/infrastructure/ai/claude/claude-cli.adapter';
 import { fileCoverage, path, plan } from '../../support/builders';
 import { RecordingLogger } from '../../support/fakes';
@@ -36,6 +39,8 @@ process.stdin.on('data', (d) => (stdin += d)).on('end', () => {
   chmodSync(script, 0o755);
   return script;
 }
+
+const LIMITS = { maxBudgetUsd: 2.5 };
 
 const result = (fields: Record<string, unknown>) =>
   JSON.stringify({
@@ -88,9 +93,13 @@ describe('ClaudeCliAdapter', () => {
       process.env.GITHUB_TOKEN = 'ghp_must_not_leak';
       process.env.ANTHROPIC_API_KEY = 'sk-test';
       try {
-        const testPlan = await new ClaudeCliAdapter(options(cli), new RecordingLogger()).plan(context);
+        const { plan: testPlan, costUsd } = await new ClaudeCliAdapter(
+          options(cli),
+          new RecordingLogger(),
+        ).plan(context, LIMITS);
         expect(testPlan.testFile.value).toBe('src/price.test.ts');
         expect(testPlan.cases).toHaveLength(1);
+        expect(costUsd).toBe(0.12);
       } finally {
         delete process.env.GITHUB_TOKEN;
         delete process.env.ANTHROPIC_API_KEY;
@@ -104,7 +113,7 @@ describe('ClaudeCliAdapter', () => {
       expect(flag(call.argv, '--tools')).toBe('Read,Grep,Glob');
       expect(flag(call.argv, '--allowedTools')).toBe('Read,Grep,Glob');
       expect(flag(call.argv, '--max-turns')).toBe('10');
-      expect(flag(call.argv, '--max-budget-usd')).toBe('3');
+      expect(flag(call.argv, '--max-budget-usd')).toBe('2.5000'); // job's remaining budget < per-call cap
       expect(call.argv).toEqual(expect.arrayContaining(['--strict-mcp-config', '--no-session-persistence']));
       expect(call.cwd).toBe(realpathSync(workspace));
       // The prompt travels on stdin, not argv, and contains the context.
@@ -121,7 +130,10 @@ describe('ClaudeCliAdapter', () => {
       const cli = fakeCli(dir, {
         stdout: result({ result: 'Here is the plan:\n```json\n' + PLAN_JSON + '\n```' }),
       });
-      const testPlan = await new ClaudeCliAdapter(options(cli), new RecordingLogger()).plan(context);
+      const { plan: testPlan } = await new ClaudeCliAdapter(options(cli), new RecordingLogger()).plan(
+        context,
+        LIMITS,
+      );
       expect(testPlan.summary).toBe('Cover discount kinds and errors.');
     });
 
@@ -148,22 +160,32 @@ describe('ClaudeCliAdapter', () => {
       ['non-JSON stdout', 'Segmentation fault', /did not return JSON/],
     ])('rejects %s', async (_label, stdout, message) => {
       const cli = fakeCli(dir, { stdout });
-      await expect(new ClaudeCliAdapter(options(cli), new RecordingLogger()).plan(context)).rejects.toThrow(
-        message,
-      );
+      await expect(
+        new ClaudeCliAdapter(options(cli), new RecordingLogger()).plan(context, LIMITS),
+      ).rejects.toThrow(message);
+    });
+
+    it('never exceeds the per-call cap and reports the cost of a failed call', async () => {
+      const cli = fakeCli(dir, { stdout: result({ is_error: true, result: 'boom', total_cost_usd: 0.4 }) });
+      const error = await new ClaudeCliAdapter(options(cli, { maxBudgetUsd: 1 }), new RecordingLogger())
+        .plan(context, { maxBudgetUsd: 4 })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(AiCallFailedError);
+      expect((error as AiCallFailedError).costUsd).toBe(0.4);
+      expect(flag(recorded().argv, '--max-budget-usd')).toBe('1.0000');
     });
 
     it('reports a crashing CLI with its exit code', async () => {
       const cli = fakeCli(dir, { stdout: '', exitCode: 2 });
-      await expect(new ClaudeCliAdapter(options(cli), new RecordingLogger()).plan(context)).rejects.toThrow(
-        /exited with code 2/,
-      );
+      await expect(
+        new ClaudeCliAdapter(options(cli), new RecordingLogger()).plan(context, LIMITS),
+      ).rejects.toThrow(/exited with code 2/);
     });
 
     it('kills the CLI on timeout', async () => {
       const cli = fakeCli(dir, { stdout: result({ result: PLAN_JSON }), sleepMs: 5000 });
       await expect(
-        new ClaudeCliAdapter(options(cli, { timeoutMs: 300 }), new RecordingLogger()).plan(context),
+        new ClaudeCliAdapter(options(cli, { timeoutMs: 300 }), new RecordingLogger()).plan(context, LIMITS),
       ).rejects.toThrow(/timed out after 300 ms/);
     });
   });
@@ -171,7 +193,7 @@ describe('ClaudeCliAdapter', () => {
   describe('write and fix', () => {
     it('runs the writer in dontAsk mode with writes allowed only for test files', async () => {
       const cli = fakeCli(dir, { stdout: result({ result: 'done' }) });
-      await new ClaudeCliAdapter(options(cli), new RecordingLogger()).write(context, plan());
+      await new ClaudeCliAdapter(options(cli), new RecordingLogger()).write(context, plan(), LIMITS);
       const call = recorded();
       expect(flag(call.argv, '--model')).toBe('sonnet');
       expect(flag(call.argv, '--permission-mode')).toBe('dontAsk');
@@ -191,6 +213,7 @@ describe('ClaudeCliAdapter', () => {
       await new ClaudeCliAdapter(options(cli, { restrictWritesToTests: false }), new RecordingLogger()).write(
         context,
         plan(),
+        LIMITS,
       );
       const call = recorded();
       expect(flag(call.argv, '--permission-mode')).toBe('acceptEdits');
@@ -205,15 +228,15 @@ describe('ClaudeCliAdapter', () => {
       });
       const logger = new RecordingLogger();
       await expect(
-        new ClaudeCliAdapter(options(cli), logger).write(context, plan()),
-      ).resolves.toBeUndefined();
+        new ClaudeCliAdapter(options(cli), logger).write(context, plan(), LIMITS),
+      ).resolves.toEqual({ costUsd: 0.12 });
       expect(logger.entries.some((e) => e.message.includes('stopped early'))).toBe(true);
     });
 
     it('fails the writer on a real error', async () => {
       const cli = fakeCli(dir, { stdout: result({ subtype: 'error_during_execution', is_error: true }) });
       await expect(
-        new ClaudeCliAdapter(options(cli), new RecordingLogger()).write(context, plan()),
+        new ClaudeCliAdapter(options(cli), new RecordingLogger()).write(context, plan(), LIMITS),
       ).rejects.toThrow(/writer failed/);
     });
 
@@ -224,6 +247,7 @@ describe('ClaudeCliAdapter', () => {
         plan(),
         ['Tests are failing.'],
         'Expected: 2\nReceived: 3\n```',
+        LIMITS,
       );
       const call = recorded();
       expect(call.stdin).toContain('- Tests are failing.');
@@ -233,11 +257,10 @@ describe('ClaudeCliAdapter', () => {
 
     it('returns the plan reported by the single-call mode', async () => {
       const cli = fakeCli(dir, { stdout: result({ result: PLAN_JSON }) });
-      const testPlan = await new ClaudeCliAdapter(options(cli), new RecordingLogger()).planAndWrite({
-        ...context,
-        coverage: null,
-        uncoveredLines: [],
-      });
+      const { plan: testPlan } = await new ClaudeCliAdapter(options(cli), new RecordingLogger()).planAndWrite(
+        { ...context, coverage: null, uncoveredLines: [] },
+        LIMITS,
+      );
       expect(testPlan.testFile.value).toBe('src/price.test.ts');
       const call = recorded();
       expect(flag(call.argv, '--permission-mode')).toBe('dontAsk');

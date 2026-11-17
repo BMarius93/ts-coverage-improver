@@ -1,4 +1,4 @@
-import { eventLabel, formatDuration, formatPercent, formatTime, jobLabel } from '../lib/format';
+import { eventLabel, formatDuration, formatPercent, formatTime, formatUsd, jobLabel } from '../lib/format';
 import type { Job } from '../lib/types';
 
 export function JobDrawer({ job, onClose }: { job: Job | null; onClose: () => void }) {
@@ -21,6 +21,11 @@ export function JobDrawer({ job, onClose }: { job: Job | null; onClose: () => vo
           <dt>Coverage</dt>
           <dd>
             {formatPercent(job.coverageBefore)} → {formatPercent(job.coverageAfter)}
+          </dd>
+          <dt>AI cost</dt>
+          <dd>
+            AI cost: {formatUsd(job.aiCostUsd)}
+            {job.budget && <span className="muted"> of {formatUsd(job.budget.maxCostUsd)} budget</span>}
           </dd>
           <dt>Attempt</dt>
           <dd>

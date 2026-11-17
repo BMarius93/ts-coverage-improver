@@ -1,4 +1,8 @@
 import {
+  AiCallFailedError,
+  AiCallLimits,
+  AiCallResult,
+  AiPlanResult,
   AiTestGeneratorPort,
   TestGenerationContext,
 } from '../../../application/ports/ai-test-generator.port';
@@ -59,8 +63,8 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
     private readonly prompts = new PromptTemplates(),
   ) {}
 
-  async plan(context: TestGenerationContext): Promise<TestPlan> {
-    const result = await this.run('planner', context, this.prompt('planner', context, {}), [
+  async plan(context: TestGenerationContext, limits: AiCallLimits): Promise<AiPlanResult> {
+    const result = await this.run('planner', context, limits, this.prompt('planner', context, {}), [
       '--model',
       this.options.plannerModel,
       '--permission-mode',
@@ -72,24 +76,38 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
       '--max-turns',
       String(this.options.plannerMaxTurns),
     ]);
-    this.assertSuccess('planner', result);
-    return extractTestPlan(result.result ?? '');
+    return withCost(result, () => {
+      this.assertSuccess('planner', result);
+      return { plan: extractTestPlan(result.result ?? ''), costUsd: costOf(result) };
+    });
   }
 
-  async write(context: TestGenerationContext, plan: TestPlan): Promise<void> {
+  async write(context: TestGenerationContext, plan: TestPlan, limits: AiCallLimits): Promise<AiCallResult> {
     const result = await this.run(
       'writer',
       context,
+      limits,
       this.prompt('writer', context, { plan: formatPlan(plan) }),
       this.writerArgs(),
     );
-    this.assertCompleted('writer', result);
+    return withCost(result, () => {
+      this.assertCompleted('writer', result);
+      return { costUsd: costOf(result) };
+    });
   }
 
-  async planAndWrite(context: TestGenerationContext): Promise<TestPlan> {
-    const result = await this.run('single', context, this.prompt('single', context, {}), this.writerArgs());
-    this.assertSuccess('single', result);
-    return extractTestPlan(result.result ?? '');
+  async planAndWrite(context: TestGenerationContext, limits: AiCallLimits): Promise<AiPlanResult> {
+    const result = await this.run(
+      'single',
+      context,
+      limits,
+      this.prompt('single', context, {}),
+      this.writerArgs(),
+    );
+    return withCost(result, () => {
+      this.assertSuccess('single', result);
+      return { plan: extractTestPlan(result.result ?? ''), costUsd: costOf(result) };
+    });
   }
 
   async fix(
@@ -97,10 +115,12 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
     plan: TestPlan,
     failures: string[],
     testOutput: string,
-  ): Promise<void> {
+    limits: AiCallLimits,
+  ): Promise<AiCallResult> {
     const result = await this.run(
       'fixer',
       context,
+      limits,
       this.prompt('fixer', context, {
         plan: formatPlan(plan),
         failures: failures.map((failure) => `- ${failure}`).join('\n'),
@@ -108,7 +128,10 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
       }),
       this.writerArgs(),
     );
-    this.assertCompleted('fixer', result);
+    return withCost(result, () => {
+      this.assertCompleted('fixer', result);
+      return { costUsd: costOf(result) };
+    });
   }
 
   /**
@@ -152,6 +175,7 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
   private async run(
     step: PromptName,
     context: TestGenerationContext,
+    limits: AiCallLimits,
     prompt: string,
     args: string[],
   ): Promise<ClaudeResult> {
@@ -162,7 +186,8 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
         '--output-format',
         'json',
         '--max-budget-usd',
-        String(this.options.maxBudgetUsd),
+        // the job's remaining budget, never more than the per-call cap
+        Math.min(limits.maxBudgetUsd, this.options.maxBudgetUsd).toFixed(4),
         '--strict-mcp-config',
         '--no-session-persistence',
         ...args,
@@ -218,6 +243,17 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
       return;
     }
     this.assertSuccess(step, result);
+  }
+}
+
+const costOf = (result: ClaudeResult): number => result.total_cost_usd ?? 0;
+
+/** Errors raised after the call ran still carry its cost, so the job's spend stays accurate. */
+function withCost<T>(result: ClaudeResult, interpret: () => T): T {
+  try {
+    return interpret();
+  } catch (error) {
+    throw new AiCallFailedError(error instanceof Error ? error.message : String(error), costOf(result));
   }
 }
 

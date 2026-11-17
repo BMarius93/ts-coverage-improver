@@ -51,6 +51,9 @@ export interface Job {
   coverageBefore: number | null;
   coverageAfter: number | null;
   testPlan: TestPlan | null;
+  revertedFiles: string[];
+  aiCostUsd: number;
+  budget: { maxCostUsd: number; deadline: string } | null;
   prUrl: string | null;
   error: string | null;
   timeline: TimelineEntry[];

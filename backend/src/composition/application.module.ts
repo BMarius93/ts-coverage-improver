@@ -76,12 +76,17 @@ export const COVERAGE_THRESHOLD = Symbol('CoverageThreshold');
     {
       provide: RequestImprovement,
       useFactory: (
+        config: AppConfig,
         repos: RepositoryRepository,
         jobs: ImprovementJobRepository,
         ids: IdGenerator,
         clock: Clock,
-      ) => new RequestImprovement(repos, jobs, ids, clock),
-      inject: [REPOSITORY_REPOSITORY, IMPROVEMENT_JOB_REPOSITORY, ID_GENERATOR, CLOCK],
+      ) =>
+        new RequestImprovement(repos, jobs, ids, clock, {
+          maxCostUsd: config.AI_JOB_MAX_BUDGET_USD,
+          maxDurationMs: config.JOB_DEADLINE_MS,
+        }),
+      inject: [APP_CONFIG, REPOSITORY_REPOSITORY, IMPROVEMENT_JOB_REPOSITORY, ID_GENERATOR, CLOCK],
     },
     {
       provide: GetDashboard,
@@ -126,6 +131,7 @@ export const COVERAGE_THRESHOLD = Symbol('CoverageThreshold');
             aiMode: config.AI_MODE,
             maxFixAttempts: config.AI_MAX_FIX_ATTEMPTS,
             verifyRuns: config.VERIFY_RUNS,
+            maxBudgetPerCallUsd: config.AI_MAX_BUDGET_USD,
             leaseMs: config.JOB_LEASE_SECONDS * 1000,
             keepFailedWorkspaces: config.KEEP_FAILED_WORKSPACES,
           },

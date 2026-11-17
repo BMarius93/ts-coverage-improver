@@ -40,7 +40,12 @@ const schema = z.object({
   AI_WRITER_MODEL: z.string().min(1).default('sonnet'),
   AI_PLANNER_MAX_TURNS: int(1, 200).default(10),
   AI_WRITER_MAX_TURNS: int(1, 200).default(30),
+  /** Cap for a single AI call; each call also stays within the job's remaining budget. */
   AI_MAX_BUDGET_USD: z.coerce.number().positive().default(3),
+  /** Total AI spend allowed for one job across all calls and attempts. */
+  AI_JOB_MAX_BUDGET_USD: z.coerce.number().positive().default(5),
+  /** Wall-clock limit for a job, counted from the request (queue time included). */
+  JOB_DEADLINE_MS: int(60_000, 86_400_000).default(1_800_000),
   AI_TIMEOUT_MS: int(1000, 3_600_000).default(600_000),
   AI_MAX_FIX_ATTEMPTS: int(0, 10).default(2),
   /** Claude permission rules allowing Write/Edit only on *.test.ts(x); non-test edits are reverted anyway. */

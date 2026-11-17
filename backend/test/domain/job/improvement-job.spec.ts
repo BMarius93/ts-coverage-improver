@@ -259,6 +259,8 @@ describe('ImprovementJob', () => {
       coverageAfter: null,
       testPlan: null,
       revertedFiles: [],
+      budget: null,
+      aiCostUsd: 0,
       prUrl: null,
       error: null,
       timeline: [...job.timeline],

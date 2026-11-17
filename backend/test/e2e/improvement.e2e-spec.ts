@@ -71,6 +71,8 @@ describe('Improvement jobs (e2e: real git, npm, Jest and verifier; scripted AI; 
     expect(job.coverageBefore).toBe(0);
     expect(job.coverageAfter).toBe(100);
     expect(job.prUrl).toBe('https://github.com/acme/sample-lib/pull/1');
+    expect(job.aiCostUsd).toBe(0.5); // planner + writer, 0.25 each
+    expect(job.budget?.maxCostUsd).toBe(5);
     expect(job.timeline.map((e) => e.event)).toEqual([
       'queued',
       'running',

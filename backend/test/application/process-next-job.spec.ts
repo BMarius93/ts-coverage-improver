@@ -1,6 +1,7 @@
 import { HARDENING_PATHS } from '../../src/application/use-cases/process-next-job';
 import { JobPhase } from '../../src/domain/job/job-status';
 import { plan } from '../support/builders';
+import { AiCallFailedError } from '../../src/application/ports/ai-test-generator.port';
 import { FakeGit, measurement } from '../support/fakes';
 import { createHarness, Harness, LEASE_MS } from '../support/harness';
 
@@ -223,6 +224,61 @@ describe('ProcessNextJob', () => {
       const single = await setup({ verifyRuns: 1 });
       await single.processNextJob.execute('worker-1');
       expect(single.coverage.measureFileCalls).toBe(2);
+    });
+  });
+
+  describe('per-job AI budget', () => {
+    it('passes the remaining budget to each call and records the total cost', async () => {
+      const h = await setup({ jobBudgetUsd: 5 });
+      h.ai.costs = { plan: 2.5, write: 0.5 };
+      await h.processNextJob.execute('worker-1');
+      expect(h.ai.limits).toEqual([3, 2.5]); // min(remaining, per-call cap 3)
+      const job = await h.jobs.findById(h.jobId);
+      expect(job?.status).toBe('completed');
+      expect(job?.aiCostUsd).toBe(3);
+    });
+
+    it('fails the job when the second call exceeds the budget', async () => {
+      const h = await setup({ jobBudgetUsd: 1 });
+      h.ai.costs = { plan: 0.6, write: 0.6 }; // write may spend up to 0.4 but overshoots slightly
+      const outcome = await h.processNextJob.execute('worker-1');
+
+      expect(outcome.kind === 'failed' && outcome.error).toBe('AI budget exceeded: spent $1.20 of $1.00');
+      expect(h.ai.limits).toEqual([1, 0.4]);
+      const job = await h.jobs.findById(h.jobId);
+      expect(job?.phase).toBe('writing'); // stopped before verifying
+      expect(job?.aiCostUsd).toBe(1.2);
+      expect(h.pullRequests.opened).toHaveLength(0);
+    });
+
+    it('stops the fix loop when a fix round exhausts the budget', async () => {
+      const h = await setup({ jobBudgetUsd: 1, maxFixAttempts: 3 });
+      h.ai.costs = { plan: 0.3, write: 0.3, fix: 0.5 };
+      h.coverage.fileMeasurements = [measurement(10), measurement(10)];
+      const outcome = await h.processNextJob.execute('worker-1');
+      expect(outcome.kind === 'failed' && outcome.error).toBe('AI budget exceeded: spent $1.10 of $1.00');
+      expect(h.ai.calls).toEqual(['plan', 'write', 'fix']);
+      expect(h.ai.limits[2]).toBeCloseTo(0.4);
+    });
+
+    it('records the cost of a failed AI call', async () => {
+      const h = await setup();
+      h.ai.failOn.write = new AiCallFailedError('writer failed (error_during_execution)', 0.7);
+      h.ai.costs = { plan: 0.2 };
+      const outcome = await h.processNextJob.execute('worker-1');
+      expect(outcome.kind).toBe('failed');
+      expect((await h.jobs.findById(h.jobId))?.aiCostUsd).toBe(0.9);
+    });
+
+    it('fails a job whose deadline passed while it was queued, before cloning', async () => {
+      const h = await setup({ jobDeadlineMs: 60_000 });
+      h.clock.advance(61_000);
+      const outcome = await h.processNextJob.execute('worker-1');
+      expect(outcome.kind === 'failed' && outcome.error).toMatch(
+        /^Job deadline exceeded: the job had to finish by /,
+      );
+      expect(h.git.calls).toEqual([]);
+      expect(h.ai.calls).toEqual([]);
     });
   });
 

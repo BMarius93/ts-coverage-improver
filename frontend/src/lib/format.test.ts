@@ -4,6 +4,7 @@ import {
   eventLabel,
   formatDuration,
   formatPercent,
+  formatUsd,
   isJobActive,
   jobLabel,
   pollInterval,
@@ -22,6 +23,9 @@ const job = (overrides: Partial<Job> = {}): Job => ({
   coverageBefore: null,
   coverageAfter: null,
   testPlan: null,
+  revertedFiles: [],
+  aiCostUsd: 0,
+  budget: null,
   prUrl: null,
   error: null,
   timeline: [],
@@ -71,6 +75,11 @@ describe('format helpers', () => {
     expect(pollInterval([repo('scanning')], [], null)).toBe(2500);
     expect(pollInterval([repo('succeeded')], [file(job({ status: 'running' }))], null)).toBe(2500);
     expect(pollInterval([], [], job({ status: 'queued' }))).toBe(2500);
+  });
+
+  it('formats money', () => {
+    expect(formatUsd(0.456)).toBe('$0.46');
+    expect(formatUsd(3)).toBe('$3.00');
   });
 
   it('formats durations', () => {

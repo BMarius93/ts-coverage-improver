@@ -1,3 +1,5 @@
+import { ImprovementJob } from '../../../src/domain/job/improvement-job';
+import { JobBudget } from '../../../src/domain/job/job-budget';
 import { PullRequestUrl } from '../../../src/domain/job/pull-request-url';
 import { Repository } from '../../../src/domain/repository/repository';
 import { ConcurrencyConflictError, ConflictError } from '../../../src/domain/shared/domain-error';
@@ -6,7 +8,7 @@ import { SqliteDatabase } from '../../../src/infrastructure/persistence/sqlite/s
 import { SqliteImprovementJobRepository } from '../../../src/infrastructure/persistence/sqlite/sqlite-improvement-job-repository';
 import { SqliteJobQueue } from '../../../src/infrastructure/persistence/sqlite/sqlite-job-queue';
 import { SqliteRepositoryRepository } from '../../../src/infrastructure/persistence/sqlite/sqlite-repository-repository';
-import { at, pct, plan, queuedJob, repoUrl, T0 } from '../../support/builders';
+import { at, path, pct, plan, queuedJob, repoUrl, T0 } from '../../support/builders';
 import { FixedClock } from '../../support/fakes';
 import { tempDatabase } from '../../support/sqlite';
 
@@ -35,13 +37,20 @@ describe('SQLite job persistence', () => {
 
   describe('SqliteImprovementJobRepository', () => {
     it('round-trips every field of a completed job', async () => {
-      const job = queuedJob();
+      const job = ImprovementJob.request({
+        id: 'job-00000001',
+        repositoryId: 'repo-1',
+        targetFile: path('src/price.ts'),
+        now: T0,
+        budget: unwrap(JobBudget.create({ maxCostUsd: 5, deadline: at(1800) })),
+      });
       await jobs.save(job);
       job.start('worker-1', at(1));
       job.recordCoverageBefore(pct(10), at(2));
       job.advanceTo('planning', at(3));
       job.recordPlan(plan(), at(4));
       job.recordRevertedFiles(['src/x.ts'], at(4));
+      job.recordAiCost(1.234567, at(4));
       for (const phase of ['writing', 'verifying', 'fixing', 'verifying', 'opening_pr'] as const) {
         job.advanceTo(phase, at(5));
       }
@@ -62,6 +71,8 @@ describe('SQLite job persistence', () => {
         plan: loaded!.testPlan?.toProps(),
         pr: loaded!.prUrl?.value,
         reverted: loaded!.revertedFiles,
+        cost: loaded!.aiCostUsd,
+        budget: { max: loaded!.budget?.maxCostUsd, deadline: loaded!.budget?.deadline },
         startedAt: loaded!.startedAt,
         finishedAt: loaded!.finishedAt,
         timeline: loaded!.timeline,
@@ -76,6 +87,8 @@ describe('SQLite job persistence', () => {
         plan: plan().toProps(),
         pr: 'https://github.com/acme/repo-1/pull/3',
         reverted: ['src/x.ts'],
+        cost: 1.234567,
+        budget: { max: 5, deadline: at(1800) },
         startedAt: at(1),
         finishedAt: at(9),
         timeline: job.timeline,

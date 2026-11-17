@@ -27,6 +27,8 @@ export function createHarness(
     maxFixAttempts?: number;
     keepFailedWorkspaces?: boolean;
     verifyRuns?: number;
+    jobBudgetUsd?: number;
+    jobDeadlineMs?: number;
   } = {},
 ) {
   const clock = new FixedClock();
@@ -59,11 +61,15 @@ export function createHarness(
       aiMode: options.aiMode ?? 'plan-and-write',
       maxFixAttempts: options.maxFixAttempts ?? 2,
       verifyRuns: options.verifyRuns ?? 2,
+      maxBudgetPerCallUsd: 3,
       leaseMs: LEASE_MS,
       keepFailedWorkspaces: options.keepFailedWorkspaces ?? false,
     },
   );
-  const requestImprovement = new RequestImprovement(repositories, jobs, ids, clock);
+  const requestImprovement = new RequestImprovement(repositories, jobs, ids, clock, {
+    maxCostUsd: options.jobBudgetUsd ?? 5,
+    maxDurationMs: options.jobDeadlineMs ?? 30 * 60_000,
+  });
   const recoverStaleJobs = new RecoverStaleJobs(jobs, jobs, repositories, clock, logger, {
     maxAttempts: 2,
     maxScanDurationMs: 30 * 60_000,

@@ -110,9 +110,13 @@ Paths are relative to the backend's working directory.
 | `AI_MODE` | `plan-and-write` | `plan-and-write` (read-only planner, then writer) or `single` (one call). |
 | `AI_PLANNER_MODEL` / `AI_WRITER_MODEL` | `opus` / `sonnet` | Models (aliases or full names). |
 | `AI_PLANNER_MAX_TURNS` / `AI_WRITER_MAX_TURNS` | `10` / `30` | `--max-turns` per call. |
-| `AI_MAX_BUDGET_USD` | `3` | `--max-budget-usd` per call. |
+| `AI_MAX_BUDGET_USD` | `3` | Cap for a single AI call; each call gets `--max-budget-usd` = min(this, the job's remaining budget). |
+| `AI_JOB_MAX_BUDGET_USD` | `5` | Total AI spend per job across all calls and attempts; the job fails with "AI budget exceeded" once reached. |
+| `JOB_DEADLINE_MS` | `1800000` | Wall-clock limit per job, counted from the request (queue time included); then "Job deadline exceeded". |
 | `AI_TIMEOUT_MS` | `600000` | Hard timeout per AI call. |
 | `AI_MAX_FIX_ATTEMPTS` | `2` | Fixer rounds after a failed verification. |
+| `AI_RESTRICT_WRITES` | `true` | Run the writer/fixer in `dontAsk` mode with permission rules that allow writes only to `*.test.ts(x)`. Non-test edits are reverted by git either way. |
+| `VERIFY_RUNS` | `2` | Test runs during verification; all must pass with identical coverage (flaky check). `1` disables it. |
 | `GIT_CLONE_BASE_URL` | `https://github.com` | *Testing:* clone/push from elsewhere (e.g. `file:///tmp/remotes`). |
 | `JEST_COMMAND` | `npx --no-install jest` | *Testing:* how Jest is invoked inside a clone. |
 

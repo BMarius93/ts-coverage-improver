@@ -1,5 +1,5 @@
 import { CoveragePercentage } from '../../domain/coverage/coverage-percentage';
-import { ImprovementJob } from '../../domain/job/improvement-job';
+import { BudgetViolation, ImprovementJob } from '../../domain/job/improvement-job';
 import { ImprovementJobRepository } from '../../domain/job/improvement-job-repository';
 import {
   ChangedFile,
@@ -14,7 +14,13 @@ import { RepositoryRepository } from '../../domain/repository/repository-reposit
 import { Clock } from '../../domain/shared/clock';
 import { ConcurrencyConflictError } from '../../domain/shared/domain-error';
 import { errorMessage, LeaseLostError, NotFoundError } from '../errors';
-import { AiTestGeneratorPort, TestGenerationContext } from '../ports/ai-test-generator.port';
+import {
+  AiCallFailedError,
+  AiCallLimits,
+  AiCallResult,
+  AiTestGeneratorPort,
+  TestGenerationContext,
+} from '../ports/ai-test-generator.port';
 import { CoverageRunnerPort, FileMeasurement } from '../ports/coverage-runner.port';
 import { GitPort } from '../ports/git.port';
 import { JobQueuePort } from '../ports/job-queue.port';
@@ -39,6 +45,8 @@ export interface ProcessNextJobOptions {
   maxFixAttempts: number;
   /** How often the tests run during a successful verification (>= 2 detects flaky tests). */
   verifyRuns: number;
+  /** Upper bound for a single AI call (AI_MAX_BUDGET_USD); the job's remaining budget may be lower. */
+  maxBudgetPerCallUsd: number;
   leaseMs: number;
   keepFailedWorkspaces: boolean;
 }
@@ -65,6 +73,17 @@ export type ProcessOutcome =
   | { kind: 'abandoned'; jobId: string; reason: string };
 
 class VerificationFailedError extends Error {}
+
+class BudgetExceededError extends Error {
+  constructor(violation: BudgetViolation, job: ImprovementJob) {
+    const budget = job.budget!;
+    super(
+      violation === 'AI budget exceeded'
+        ? `${violation}: spent $${job.aiCostUsd.toFixed(2)} of $${budget.maxCostUsd.toFixed(2)}`
+        : `${violation}: the job had to finish by ${budget.deadline.toISOString()}`,
+    );
+  }
+}
 
 interface VerificationAttempt {
   verification: VerificationOutcome;
@@ -121,6 +140,7 @@ export class ProcessNextJob {
 
   private async runPipeline(state: RunState): Promise<string> {
     const { job } = state;
+    this.assertWithinBudget(job); // the deadline may have passed while the job was queued
     const repository = await this.deps.repositories.findById(job.repositoryId);
     if (!repository) {
       throw new NotFoundError('Repository', job.repositoryId);
@@ -161,7 +181,9 @@ export class ProcessNextJob {
         throw new VerificationFailedError(this.describeFailure(attempt.verification, job.fixAttempts));
       }
       await this.advance(state, 'fixing');
-      await this.deps.ai.fix(context, plan, attempt.verification.failures, attempt.output);
+      await this.callAi(state, (limits) =>
+        this.deps.ai.fix(context, plan, attempt.verification.failures, attempt.output, limits),
+      );
     }
     const { measurement, changedFiles } = attempt;
 
@@ -258,16 +280,18 @@ export class ProcessNextJob {
     const { job } = state;
     if (this.options.aiMode === 'single') {
       await this.advance(state, 'writing');
-      const plan = await this.deps.ai.planAndWrite(context);
+      const { plan } = await this.callAi(state, (limits) => this.deps.ai.planAndWrite(context, limits));
       job.recordPlan(plan, this.now());
       await this.persist(state);
       return plan;
     }
     await this.advance(state, 'planning');
-    const plan = await this.deps.ai.plan(context);
+    const { plan } = await this.callAi(state, (limits) => this.deps.ai.plan(context, limits));
     job.recordPlan(plan, this.now());
     await this.advance(state, 'writing');
-    await this.deps.ai.write({ ...context, suggestedTestFile: plan.testFile }, plan);
+    await this.callAi(state, (limits) =>
+      this.deps.ai.write({ ...context, suggestedTestFile: plan.testFile }, plan, limits),
+    );
     return plan;
   }
 
@@ -310,8 +334,39 @@ export class ProcessNextJob {
   }
 
   private async advance(state: RunState, phase: JobPhase): Promise<void> {
+    this.assertWithinBudget(state.job);
     state.job.advanceTo(phase, this.now());
     await this.persist(state);
+  }
+
+  /**
+   * Runs one AI call within the job's remaining budget (capped per call by `maxBudgetPerCallUsd`) and records
+   * its cost, also when the call failed after spending money. The cost is persisted with the next save.
+   */
+  private async callAi<T extends AiCallResult>(
+    state: RunState,
+    call: (limits: AiCallLimits) => Promise<T>,
+  ): Promise<T> {
+    const { job } = state;
+    this.assertWithinBudget(job);
+    const maxBudgetUsd = Math.min(job.remainingBudgetUsd(), this.options.maxBudgetPerCallUsd);
+    try {
+      const result = await call({ maxBudgetUsd });
+      job.recordAiCost(result.costUsd, this.now());
+      return result;
+    } catch (error) {
+      if (error instanceof AiCallFailedError) {
+        job.recordAiCost(error.costUsd, this.now());
+      }
+      throw error;
+    }
+  }
+
+  private assertWithinBudget(job: ImprovementJob): void {
+    const violation = job.budgetViolation(this.now());
+    if (violation) {
+      throw new BudgetExceededError(violation, job);
+    }
   }
 
   private async persist(state: RunState): Promise<void> {

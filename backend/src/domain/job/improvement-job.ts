@@ -1,6 +1,7 @@
 import { CoveragePercentage } from '../coverage/coverage-percentage';
 import { FilePath } from '../coverage/file-path';
 import { IllegalStateTransitionError, ValidationError } from '../shared/domain-error';
+import { JobBudget } from './job-budget';
 import { canAdvance, JobPhase, JobStatus } from './job-status';
 import { PullRequestUrl } from './pull-request-url';
 import { TestPlan } from './test-plan';
@@ -28,6 +29,10 @@ export interface ImprovementJobProps {
   testPlan: TestPlan | null;
   /** Non-test files the AI changed that the pipeline restored before verification. */
   revertedFiles: string[];
+  /** Null for jobs created before budgets existed: no limits apply. */
+  budget: JobBudget | null;
+  /** AI spend so far, across all calls and attempts. */
+  aiCostUsd: number;
   prUrl: PullRequestUrl | null;
   error: string | null;
   timeline: TimelineEntry[];
@@ -39,6 +44,9 @@ export interface ImprovementJobProps {
 }
 
 export type LeaseExpiryOutcome = 'requeued' | 'failed';
+
+/** Why a job may not continue: its AI spend or its deadline is exhausted. */
+export type BudgetViolation = 'AI budget exceeded' | 'Job deadline exceeded';
 
 const MAX_ERROR_LENGTH = 4000;
 
@@ -61,6 +69,7 @@ export class ImprovementJob {
     repositoryId: string;
     targetFile: FilePath;
     now: Date;
+    budget?: JobBudget | null;
   }): ImprovementJob {
     if (params.id.trim() === '' || params.repositoryId.trim() === '') {
       throw new ValidationError('Job id and repository id are required');
@@ -84,6 +93,8 @@ export class ImprovementJob {
       coverageAfter: null,
       testPlan: null,
       revertedFiles: [],
+      budget: params.budget ?? null,
+      aiCostUsd: 0,
       prUrl: null,
       error: null,
       timeline: [{ event: 'queued', at: params.now }],
@@ -142,6 +153,12 @@ export class ImprovementJob {
   }
   get revertedFiles(): readonly string[] {
     return this.props.revertedFiles;
+  }
+  get budget(): JobBudget | null {
+    return this.props.budget;
+  }
+  get aiCostUsd(): number {
+    return this.props.aiCostUsd;
   }
   get prUrl(): PullRequestUrl | null {
     return this.props.prUrl;
@@ -235,6 +252,34 @@ export class ImprovementJob {
       );
     }
     this.props = { ...this.props, testPlan: plan, updatedAt: now };
+  }
+
+  /** Adds the cost of one AI call (recorded even when the call itself failed). */
+  recordAiCost(usd: number, now: Date): void {
+    this.assertStatus('running', 'record AI cost');
+    if (!Number.isFinite(usd) || usd < 0) {
+      throw new ValidationError(`AI cost must be a non-negative amount, got ${usd}`);
+    }
+    const aiCostUsd = Math.round((this.props.aiCostUsd + usd) * 1e6) / 1e6;
+    this.props = { ...this.props, aiCostUsd, updatedAt: now };
+  }
+
+  /** What may still be spent on AI; Infinity when the job has no budget. */
+  remainingBudgetUsd(): number {
+    const budget = this.props.budget;
+    return budget === null ? Number.POSITIVE_INFINITY : Math.max(0, budget.maxCostUsd - this.props.aiCostUsd);
+  }
+
+  budgetViolation(now: Date): BudgetViolation | null {
+    const budget = this.props.budget;
+    if (budget === null) return null;
+    if (this.props.aiCostUsd >= budget.maxCostUsd) return 'AI budget exceeded';
+    if (budget.isPastDeadline(now)) return 'Job deadline exceeded';
+    return null;
+  }
+
+  isOverBudget(now: Date): boolean {
+    return this.budgetViolation(now) !== null;
   }
 
   /** Remembers non-test files that were restored (accumulated across fix rounds, without duplicates). */

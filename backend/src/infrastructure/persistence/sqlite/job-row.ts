@@ -1,6 +1,7 @@
 import { CoveragePercentage } from '../../../domain/coverage/coverage-percentage';
 import { FilePath } from '../../../domain/coverage/file-path';
 import { ImprovementJob, TimelineEntry, TimelineEvent } from '../../../domain/job/improvement-job';
+import { JobBudget } from '../../../domain/job/job-budget';
 import { JobPhase, JobStatus } from '../../../domain/job/job-status';
 import { PullRequestUrl } from '../../../domain/job/pull-request-url';
 import { TestPlan, TestPlanProps } from '../../../domain/job/test-plan';
@@ -21,6 +22,9 @@ export interface JobRow {
   coverage_after: number | null;
   test_plan: string | null;
   reverted_files: string;
+  ai_cost_usd: number;
+  budget_max_cost_usd: number | null;
+  budget_deadline: string | null;
   pr_url: string | null;
   error: string | null;
   timeline: string;
@@ -64,6 +68,9 @@ export function toJobColumns(job: ImprovementJob): JobColumns {
     coverage_after: job.coverageAfter?.value ?? null,
     test_plan: job.testPlan ? JSON.stringify(job.testPlan.toProps()) : null,
     reverted_files: JSON.stringify(job.revertedFiles),
+    ai_cost_usd: job.aiCostUsd,
+    budget_max_cost_usd: job.budget?.maxCostUsd ?? null,
+    budget_deadline: job.budget?.deadline.toISOString() ?? null,
     pr_url: job.prUrl?.value ?? null,
     error: job.error,
     timeline: JSON.stringify(timeline),
@@ -95,6 +102,16 @@ export function toJob(row: JobRow): ImprovementJob {
     coverageAfter: pct(row.coverage_after),
     testPlan: row.test_plan ? unwrap(TestPlan.create(JSON.parse(row.test_plan) as TestPlanProps)) : null,
     revertedFiles: JSON.parse(row.reverted_files) as string[],
+    budget:
+      row.budget_max_cost_usd === null || row.budget_deadline === null
+        ? null
+        : unwrap(
+            JobBudget.create({
+              maxCostUsd: row.budget_max_cost_usd,
+              deadline: new Date(row.budget_deadline),
+            }),
+          ),
+    aiCostUsd: row.ai_cost_usd,
     prUrl: row.pr_url ? unwrap(PullRequestUrl.create(row.pr_url)) : null,
     error: row.error,
     timeline,

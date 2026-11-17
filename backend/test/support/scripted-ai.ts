@@ -1,6 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AiCallResult,
+  AiPlanResult,
   AiTestGeneratorPort,
   TestGenerationContext,
 } from '../../src/application/ports/ai-test-generator.port';
@@ -31,41 +33,41 @@ export class ScriptedAi implements AiTestGeneratorPort {
   /** Extra files the "AI" writes besides the test, e.g. a tampered source file. */
   extraWrites: Record<string, string> = {};
   testContent = STRINGS_TEST;
+  costPerCall = 0.25;
 
-  async plan(context: TestGenerationContext): Promise<TestPlan> {
+  async plan(context: TestGenerationContext): Promise<AiPlanResult> {
     this.calls.push('plan');
-    return Promise.resolve(
-      unwrap(
-        TestPlan.create({
-          testFilePath: context.suggestedTestFile.value,
-          summary: 'Cover both branches of capitalize.',
-          cases: [
-            { name: 'upper-cases the first letter', covers: 'non-empty input' },
-            { name: 'returns an empty string unchanged', covers: 'empty input branch' },
-          ],
-        }),
-      ),
+    const plan = unwrap(
+      TestPlan.create({
+        testFilePath: context.suggestedTestFile.value,
+        summary: 'Cover both branches of capitalize.',
+        cases: [
+          { name: 'upper-cases the first letter', covers: 'non-empty input' },
+          { name: 'returns an empty string unchanged', covers: 'empty input branch' },
+        ],
+      }),
     );
+    return Promise.resolve({ plan, costUsd: this.costPerCall });
   }
 
-  async write(context: TestGenerationContext, plan: TestPlan): Promise<void> {
+  async write(context: TestGenerationContext, plan: TestPlan): Promise<AiCallResult> {
     this.calls.push('write');
     writeFileSync(join(context.workspaceDir, plan.testFile.value), this.testContent);
     for (const [file, content] of Object.entries(this.extraWrites)) {
       writeFileSync(join(context.workspaceDir, file), content);
     }
-    return Promise.resolve();
+    return Promise.resolve({ costUsd: this.costPerCall });
   }
 
-  async planAndWrite(context: TestGenerationContext): Promise<TestPlan> {
-    const plan = await this.plan(context);
+  async planAndWrite(context: TestGenerationContext): Promise<AiPlanResult> {
+    const { plan } = await this.plan(context);
     await this.write(context, plan);
-    return plan;
+    return { plan, costUsd: this.costPerCall };
   }
 
-  async fix(): Promise<void> {
+  async fix(): Promise<AiCallResult> {
     this.calls.push('fix');
-    return Promise.resolve();
+    return Promise.resolve({ costUsd: this.costPerCall });
   }
 }
 

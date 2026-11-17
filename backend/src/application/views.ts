@@ -50,6 +50,8 @@ export interface JobView {
   coverageAfter: number | null;
   testPlan: TestPlanProps | null;
   revertedFiles: string[];
+  aiCostUsd: number;
+  budget: { maxCostUsd: number; deadline: string } | null;
   prUrl: string | null;
   error: string | null;
   timeline: TimelineEntryView[];
@@ -85,6 +87,10 @@ export function toJobView(job: ImprovementJob): JobView {
     coverageAfter: job.coverageAfter?.value ?? null,
     testPlan: job.testPlan?.toProps() ?? null,
     revertedFiles: [...job.revertedFiles],
+    aiCostUsd: job.aiCostUsd,
+    budget: job.budget
+      ? { maxCostUsd: job.budget.maxCostUsd, deadline: job.budget.deadline.toISOString() }
+      : null,
     prUrl: job.prUrl?.value ?? null,
     error: job.error,
     timeline: job.timeline.map((entry) => ({

@@ -1,4 +1,7 @@
 import {
+  AiCallLimits,
+  AiCallResult,
+  AiPlanResult,
   AiTestGeneratorPort,
   TestGenerationContext,
 } from '../../src/application/ports/ai-test-generator.port';
@@ -91,6 +94,8 @@ export function copyJob(job: ImprovementJob): ImprovementJob {
     coverageAfter: job.coverageAfter,
     testPlan: job.testPlan,
     revertedFiles: [...job.revertedFiles],
+    budget: job.budget,
+    aiCostUsd: job.aiCostUsd,
     prUrl: job.prUrl,
     error: job.error,
     timeline: [...job.timeline],
@@ -295,36 +300,44 @@ export class FakeCoverageRunner implements CoverageRunnerPort {
 export class FakeAi implements AiTestGeneratorPort {
   readonly calls: string[] = [];
   readonly fixRequests: Array<{ failures: string[]; output: string }> = [];
+  /** `--max-budget-usd` each call received. */
+  readonly limits: number[] = [];
   testPlan: TestPlan = buildPlan();
+  /** Cost reported by each call (by method), default 0.10. */
+  costs: Partial<Record<keyof AiTestGeneratorPort, number>> = {};
   failOn: Partial<Record<keyof AiTestGeneratorPort, Error>> = {};
   /** Hook to simulate side effects (e.g. losing the lease while the AI works). */
   onCall: (method: keyof AiTestGeneratorPort) => void = () => undefined;
 
-  private check(method: keyof AiTestGeneratorPort): void {
+  private check(method: keyof AiTestGeneratorPort, limits: AiCallLimits): number {
     this.calls.push(method);
+    this.limits.push(limits.maxBudgetUsd);
     this.onCall(method);
     const failure = this.failOn[method];
     if (failure) throw failure;
+    return this.costs[method] ?? 0.1;
   }
-  async plan(_context: TestGenerationContext): Promise<TestPlan> {
-    this.check('plan');
-    return this.testPlan;
+  async plan(_context: TestGenerationContext, limits: AiCallLimits): Promise<AiPlanResult> {
+    const costUsd = this.check('plan', limits);
+    return { plan: this.testPlan, costUsd };
   }
-  async write(_context: TestGenerationContext, _plan: TestPlan): Promise<void> {
-    this.check('write');
+  async write(_context: TestGenerationContext, _plan: TestPlan, limits: AiCallLimits): Promise<AiCallResult> {
+    return { costUsd: this.check('write', limits) };
   }
-  async planAndWrite(_context: TestGenerationContext): Promise<TestPlan> {
-    this.check('planAndWrite');
-    return this.testPlan;
+  async planAndWrite(_context: TestGenerationContext, limits: AiCallLimits): Promise<AiPlanResult> {
+    const costUsd = this.check('planAndWrite', limits);
+    return { plan: this.testPlan, costUsd };
   }
   async fix(
     _context: TestGenerationContext,
     _plan: TestPlan,
     failures: string[],
     output: string,
-  ): Promise<void> {
-    this.check('fix');
+    limits: AiCallLimits,
+  ): Promise<AiCallResult> {
+    const costUsd = this.check('fix', limits);
     this.fixRequests.push({ failures, output });
+    return { costUsd };
   }
 }
 
