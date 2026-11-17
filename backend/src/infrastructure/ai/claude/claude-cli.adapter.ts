@@ -18,6 +18,8 @@ export interface ClaudeCliOptions {
   writerMaxTurns: number;
   maxBudgetUsd: number;
   timeoutMs: number;
+  /** Allow Write/Edit only on `*.test.ts(x)` via permission rules (git restore enforces it regardless). */
+  restrictWritesToTests: boolean;
 }
 
 /** Credentials/config the CLI may need. GITHUB_TOKEN is deliberately absent. */
@@ -31,7 +33,14 @@ const CLAUDE_ENV_ALLOW_LIST = [
 
 const READ_ONLY_TOOLS = 'Read,Grep,Glob';
 const WRITER_TOOLS = 'Read,Grep,Glob,Write,Edit,Bash';
-const WRITER_ALLOWED = 'Read,Grep,Glob,Write,Edit,Bash(npx jest:*)';
+const WRITER_ALLOWED = 'Read,Grep,Glob,Bash(npx jest:*)';
+/**
+ * Claude Code permission rules: `Edit(<gitignore pattern>)` governs every file-writing tool (Write, Edit,
+ * MultiEdit); `**` makes the pattern match at any depth below the cwd.
+ */
+export const TEST_FILES_ONLY_SETTINGS = JSON.stringify({
+  permissions: { allow: ['Edit(**/*.test.ts)', 'Edit(**/*.test.tsx)'] },
+});
 
 /**
  * AiTestGeneratorPort using Claude Code in headless mode (`claude -p`).
@@ -102,16 +111,28 @@ export class ClaudeCliAdapter implements AiTestGeneratorPort {
     this.assertCompleted('fixer', result);
   }
 
+  /**
+   * With restricted writes the writer runs in `dontAsk` mode: anything not pre-approved (by `--allowedTools` or
+   * the `--settings` rules) is denied without prompting. `acceptEdits` must not be used then, because it
+   * auto-approves every edit inside the working directory.
+   */
   private writerArgs(): string[] {
+    const permissions = this.options.restrictWritesToTests
+      ? [
+          '--permission-mode',
+          'dontAsk',
+          '--settings',
+          TEST_FILES_ONLY_SETTINGS,
+          '--allowedTools',
+          WRITER_ALLOWED,
+        ]
+      : ['--permission-mode', 'acceptEdits', '--allowedTools', `${WRITER_ALLOWED},Write,Edit`];
     return [
       '--model',
       this.options.writerModel,
-      '--permission-mode',
-      'acceptEdits',
+      ...permissions,
       '--tools',
       WRITER_TOOLS,
-      '--allowedTools',
-      WRITER_ALLOWED,
       '--max-turns',
       String(this.options.writerMaxTurns),
     ];

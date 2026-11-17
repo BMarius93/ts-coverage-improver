@@ -378,3 +378,28 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
 - **Alternatives:** Jest `--randomize`/`--runInBand` variations (more signal, slower); rerunning only the new test
   file (misses interactions with existing tests).
 - **Consequences:** One extra Jest run per successful verification. `VERIFY_RUNS=1` disables the check.
+
+### ADR-7.2 Restore non-test changes before verification; restrict writes at the source
+- **Context:** Previously any AI edit outside test files failed verification and burned a fix round (or the
+  job), although the tests themselves were often fine.
+- **Decision (restore):** `GitPort.restoreNonTestChanges(dir, keep)` runs right before every verification:
+  tracked modified/deleted files → `git checkout HEAD -- <path>` (also undoes staged edits); new files (untracked
+  or staged) → `git rm --cached` + delete; a staged rename restores the original path too (`ChangedFile.from`
+  was added for that). The pipeline's `keep` predicate keeps `*.test.ts(x)` and everything under
+  `HARDENING_PATHS` (those deletions are expected). Reverted paths are logged and accumulated on the job
+  (`ImprovementJob.revertedFiles`, migration `002_reverted_files.sql`, exposed in `JobView`) for the PR body.
+  `ImprovementVerifier` keeps its "only test files" rule as the last line of defence.
+- **Decision (source restriction):** checked against the official docs (permissions + CLI reference) and with
+  a zero-cost probe of v2.1.326:
+  - `Edit(<gitignore pattern>)` rules govern **all** file-writing tools (Write, Edit, MultiEdit); there is no
+    path-scoped `Write(...)` rule. `**/*.test.ts` matches at any depth below the cwd.
+  - `--permission-mode acceptEdits` auto-approves *every* edit inside the cwd, so it would defeat the rule.
+    The writer/fixer therefore run with `--permission-mode dontAsk` (anything not pre-approved is denied
+    without prompting), `--settings '{"permissions":{"allow":["Edit(**/*.test.ts)","Edit(**/*.test.tsx)"]}}'`
+    and `--allowedTools Read,Grep,Glob,Bash(npx jest:*)`.
+  - The probe confirmed both flags are accepted (inline JSON for `--settings`); actual enforcement can only
+    be observed in a paid run, so `AI_RESTRICT_WRITES=false` restores the previous `acceptEdits` behaviour
+    as an escape hatch. Correctness never depends on it: git restore + verifier enforce the rule.
+- The fixer prompt no longer asks the AI to restore files itself.
+- **Consequences:** an AI that "fixes" the source to make its tests pass now ends up with failing tests
+  (against the restored source) and gets a fix round with that feedback, instead of a hard verification failure.

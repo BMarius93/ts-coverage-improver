@@ -49,6 +49,7 @@ export interface JobView {
   coverageBefore: number | null;
   coverageAfter: number | null;
   testPlan: TestPlanProps | null;
+  revertedFiles: string[];
   prUrl: string | null;
   error: string | null;
   timeline: TimelineEntryView[];
@@ -83,6 +84,7 @@ export function toJobView(job: ImprovementJob): JobView {
     coverageBefore: job.coverageBefore?.value ?? null,
     coverageAfter: job.coverageAfter?.value ?? null,
     testPlan: job.testPlan?.toProps() ?? null,
+    revertedFiles: [...job.revertedFiles],
     prUrl: job.prUrl?.value ?? null,
     error: job.error,
     timeline: job.timeline.map((entry) => ({

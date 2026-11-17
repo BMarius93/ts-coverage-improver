@@ -26,6 +26,8 @@ export interface ImprovementJobProps {
   coverageBefore: CoveragePercentage | null;
   coverageAfter: CoveragePercentage | null;
   testPlan: TestPlan | null;
+  /** Non-test files the AI changed that the pipeline restored before verification. */
+  revertedFiles: string[];
   prUrl: PullRequestUrl | null;
   error: string | null;
   timeline: TimelineEntry[];
@@ -81,6 +83,7 @@ export class ImprovementJob {
       coverageBefore: null,
       coverageAfter: null,
       testPlan: null,
+      revertedFiles: [],
       prUrl: null,
       error: null,
       timeline: [{ event: 'queued', at: params.now }],
@@ -94,7 +97,11 @@ export class ImprovementJob {
 
   /** Rebuilds an aggregate from persistence; the data is trusted to already satisfy invariants. */
   static reconstitute(props: ImprovementJobProps): ImprovementJob {
-    return new ImprovementJob({ ...props, timeline: [...props.timeline] });
+    return new ImprovementJob({
+      ...props,
+      timeline: [...props.timeline],
+      revertedFiles: [...props.revertedFiles],
+    });
   }
 
   get id(): string {
@@ -132,6 +139,9 @@ export class ImprovementJob {
   }
   get testPlan(): TestPlan | null {
     return this.props.testPlan;
+  }
+  get revertedFiles(): readonly string[] {
+    return this.props.revertedFiles;
   }
   get prUrl(): PullRequestUrl | null {
     return this.props.prUrl;
@@ -225,6 +235,14 @@ export class ImprovementJob {
       );
     }
     this.props = { ...this.props, testPlan: plan, updatedAt: now };
+  }
+
+  /** Remembers non-test files that were restored (accumulated across fix rounds, without duplicates). */
+  recordRevertedFiles(paths: string[], now: Date): void {
+    this.assertStatus('running', 'record reverted files');
+    if (paths.length === 0) return;
+    const revertedFiles = [...new Set([...this.props.revertedFiles, ...paths])].sort();
+    this.props = { ...this.props, revertedFiles, updatedAt: now };
   }
 
   complete(prUrl: PullRequestUrl, coverageAfter: CoveragePercentage, now: Date): void {

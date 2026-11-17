@@ -1,7 +1,12 @@
 import { CoveragePercentage } from '../../domain/coverage/coverage-percentage';
 import { ImprovementJob } from '../../domain/job/improvement-job';
 import { ImprovementJobRepository } from '../../domain/job/improvement-job-repository';
-import { ChangedFile, ImprovementVerifier, VerificationOutcome } from '../../domain/job/improvement-verifier';
+import {
+  ChangedFile,
+  ImprovementVerifier,
+  isTestFilePath,
+  VerificationOutcome,
+} from '../../domain/job/improvement-verifier';
 import { JobPhase } from '../../domain/job/job-status';
 import { TestPlan } from '../../domain/job/test-plan';
 import { Repository } from '../../domain/repository/repository';
@@ -21,6 +26,11 @@ import { PullRequestDescription } from '../services/pull-request-description';
 
 /** Files that could steer the AI agent if left in the clone (prompt-injection hardening). */
 export const HARDENING_PATHS = ['.claude', 'CLAUDE.md', 'CLAUDE.local.md'];
+
+/** What the AI may leave changed: test files, plus the hardening deletions the pipeline made itself. */
+const keepBeforeVerification = (path: string): boolean =>
+  isTestFilePath(path) ||
+  HARDENING_PATHS.some((hardened) => path === hardened || path.startsWith(`${hardened}/`));
 
 export type AiMode = 'single' | 'plan-and-write';
 
@@ -185,7 +195,8 @@ export class ProcessNextJob {
   }
 
   /**
-   * Measures, inspects the working tree and applies the verifier. Once a first run passes, the tests are run
+   * Restores non-test edits, measures, inspects the working tree and applies the verifier (which still rejects
+   * non-test changes as the last line of defence). Once a first run passes, the tests are run
    * `verifyRuns - 1` more times: every run must pass with identical line coverage, otherwise the result is
    * treated as flaky and goes to the fix loop with the output of every run.
    */
@@ -196,6 +207,12 @@ export class ProcessNextJob {
     coverageBefore: CoveragePercentage,
   ): Promise<VerificationAttempt> {
     const { job } = state;
+    // Undo the AI's edits outside test files, so only its tests are verified (and later committed).
+    const reverted = await this.deps.git.restoreNonTestChanges(dir, keepBeforeVerification);
+    if (reverted.length > 0) {
+      this.deps.logger.warn('Reverted non-test changes made by the AI', { jobId: job.id, files: reverted });
+      job.recordRevertedFiles(reverted, this.now());
+    }
     const first = await this.deps.coverage.measureFile(dir, job.targetFile);
     const changedFiles = await this.deps.git.changedFiles(dir);
     const input = {

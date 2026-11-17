@@ -103,8 +103,11 @@ describe('Improvement jobs (e2e: real git, npm, Jest and verifier; scripted AI; 
     expect((jobs.body as JobView[]).map((j) => j.id)).toEqual([job.id]);
   });
 
-  it('fails the job, pushes nothing and opens no PR when the AI touches source files', async () => {
-    ai.extraWrites = { 'src/strings.ts': 'export const capitalize = (s: string) => s;\n' };
+  it('reverts source files the AI touched, verifies only its tests and records the revert', async () => {
+    ai.extraWrites = {
+      'src/strings.ts': 'export const capitalize = (s: string) => s;\n',
+      'src/sneaky.ts': 'export const x = 1;\n',
+    };
     const repositoryId = await scannedRepository(http);
     const created = await request(http)
       .post('/jobs')
@@ -112,12 +115,14 @@ describe('Improvement jobs (e2e: real git, npm, Jest and verifier; scripted AI; 
       .expect(201);
 
     const job = await jobOf(http, (created.body as JobView).id);
-    expect(job.status).toBe('failed');
-    expect(job.phase).toBe('verifying');
-    expect(job.error).toContain('Only *.test.ts files may change, but src/strings.ts was modified.');
-    expect(ai.calls).toEqual(['plan', 'write', 'fix']);
-    expect(pullRequests.opened).toHaveLength(0);
-    expect(gitOutput(ctx.remote.bareRepo, 'branch', '--list', 'coverage/*')).toBe('');
+    expect(job.error).toBeNull();
+    expect(job.status).toBe('completed');
+    expect(job.revertedFiles).toEqual(['src/sneaky.ts', 'src/strings.ts']);
+    expect(ai.calls).toEqual(['plan', 'write']);
+    // Only the test reached the remote; the original source is intact there.
+    expect(gitOutput(ctx.remote.bareRepo, 'diff', '--name-status', 'main', job.branchName!)).toBe(
+      'A\tsrc/strings.test.ts',
+    );
   });
 
   it('fails the job when the generated tests do not pass', async () => {

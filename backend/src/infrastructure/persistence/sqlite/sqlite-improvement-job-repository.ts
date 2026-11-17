@@ -23,10 +23,10 @@ export class SqliteImprovementJobRepository implements ImprovementJobRepository 
           ? this.db
               .prepare(
                 `INSERT INTO jobs (id, repository_id, target_file, status, phase, attempts, fix_attempts, worker_id,
-                   lease_until, branch_name, coverage_before, coverage_after, test_plan, pr_url, error, timeline,
+                   lease_until, branch_name, coverage_before, coverage_after, test_plan, reverted_files, pr_url, error, timeline,
                    created_at, updated_at, started_at, finished_at, version)
                  VALUES (@id, @repository_id, @target_file, @status, @phase, @attempts, @fix_attempts, @worker_id,
-                   NULL, @branch_name, @coverage_before, @coverage_after, @test_plan, @pr_url, @error, @timeline,
+                   NULL, @branch_name, @coverage_before, @coverage_after, @test_plan, @reverted_files, @pr_url, @error, @timeline,
                    @created_at, @updated_at, @started_at, @finished_at, 1)`,
               )
               .run(columns)
@@ -36,7 +36,7 @@ export class SqliteImprovementJobRepository implements ImprovementJobRepository 
                    worker_id = @worker_id,
                    lease_until = CASE WHEN @status = 'running' THEN lease_until ELSE NULL END,
                    branch_name = @branch_name, coverage_before = @coverage_before, coverage_after = @coverage_after,
-                   test_plan = @test_plan, pr_url = @pr_url, error = @error, timeline = @timeline,
+                   test_plan = @test_plan, reverted_files = @reverted_files, pr_url = @pr_url, error = @error, timeline = @timeline,
                    updated_at = @updated_at, started_at = @started_at, finished_at = @finished_at,
                    version = version + 1
                  WHERE id = @id AND version = @version`,

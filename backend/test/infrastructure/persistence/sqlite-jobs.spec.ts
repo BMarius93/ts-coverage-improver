@@ -41,6 +41,7 @@ describe('SQLite job persistence', () => {
       job.recordCoverageBefore(pct(10), at(2));
       job.advanceTo('planning', at(3));
       job.recordPlan(plan(), at(4));
+      job.recordRevertedFiles(['src/x.ts'], at(4));
       for (const phase of ['writing', 'verifying', 'fixing', 'verifying', 'opening_pr'] as const) {
         job.advanceTo(phase, at(5));
       }
@@ -60,6 +61,7 @@ describe('SQLite job persistence', () => {
         after: loaded!.coverageAfter?.value,
         plan: loaded!.testPlan?.toProps(),
         pr: loaded!.prUrl?.value,
+        reverted: loaded!.revertedFiles,
         startedAt: loaded!.startedAt,
         finishedAt: loaded!.finishedAt,
         timeline: loaded!.timeline,
@@ -73,6 +75,7 @@ describe('SQLite job persistence', () => {
         after: 91.5,
         plan: plan().toProps(),
         pr: 'https://github.com/acme/repo-1/pull/3',
+        reverted: ['src/x.ts'],
         startedAt: at(1),
         finishedAt: at(9),
         timeline: job.timeline,

@@ -64,6 +64,7 @@ import { FsWorkspace } from '../infrastructure/workspace/fs-workspace';
             writerMaxTurns: config.AI_WRITER_MAX_TURNS,
             maxBudgetUsd: config.AI_MAX_BUDGET_USD,
             timeoutMs: config.AI_TIMEOUT_MS,
+            restrictWritesToTests: config.AI_RESTRICT_WRITES,
           },
           logger,
         ),

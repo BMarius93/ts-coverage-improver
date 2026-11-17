@@ -90,6 +90,7 @@ export function copyJob(job: ImprovementJob): ImprovementJob {
     coverageBefore: job.coverageBefore,
     coverageAfter: job.coverageAfter,
     testPlan: job.testPlan,
+    revertedFiles: [...job.revertedFiles],
     prUrl: job.prUrl,
     error: job.error,
     timeline: [...job.timeline],
@@ -237,6 +238,13 @@ export class FakeGit implements GitPort {
   async changedFiles(): Promise<ChangedFile[]> {
     this.check('changedFiles');
     return this.changes;
+  }
+  /** Like git: drops every non-kept change from the fake working tree. */
+  async restoreNonTestChanges(_dir: string, keep: (path: string) => boolean): Promise<string[]> {
+    this.check('restoreNonTestChanges');
+    const reverted = this.changes.filter((file) => !keep(file.path)).map((file) => file.path);
+    this.changes = this.changes.filter((file) => keep(file.path));
+    return reverted;
   }
   async commit(_dir: string, files: string[], message: string): Promise<void> {
     this.check('commit');

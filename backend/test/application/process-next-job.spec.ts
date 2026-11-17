@@ -1,7 +1,7 @@
 import { HARDENING_PATHS } from '../../src/application/use-cases/process-next-job';
 import { JobPhase } from '../../src/domain/job/job-status';
 import { plan } from '../support/builders';
-import { measurement } from '../support/fakes';
+import { FakeGit, measurement } from '../support/fakes';
 import { createHarness, Harness, LEASE_MS } from '../support/harness';
 
 async function setup(
@@ -136,8 +136,40 @@ describe('ProcessNextJob', () => {
       expect(h.workspace.removed).toHaveLength(0); // kept for inspection
     });
 
-    it('rejects changes to non-test files even when coverage rose', async () => {
+    it('reverts non-test edits before verifying, records them and still opens the PR', async () => {
+      const h = await setup();
+      h.git.changes = [
+        { path: 'src/price.test.ts', kind: 'added' },
+        { path: 'src/price.ts', kind: 'modified' },
+        { path: 'src/helper.ts', kind: 'added' },
+        { path: 'CLAUDE.md', kind: 'deleted' },
+      ];
+      const order: string[] = [];
+      jest.spyOn(h.git, 'restoreNonTestChanges').mockImplementation(async (dir, keep) => {
+        order.push('restore');
+        return FakeGit.prototype.restoreNonTestChanges.call(h.git, dir, keep);
+      });
+      const measure = h.coverage.measureFile.bind(h.coverage);
+      jest.spyOn(h.coverage, 'measureFile').mockImplementation(async (dir, target) => {
+        order.push('measure');
+        return measure(dir, target);
+      });
+
+      const outcome = await h.processNextJob.execute('worker-1');
+
+      expect(outcome.kind).toBe('completed');
+      expect(order).toEqual(['measure', 'restore', 'measure', 'measure']); // before, restore, 2 verify runs
+      const job = await h.jobs.findById(h.jobId);
+      expect(job?.revertedFiles).toEqual(['src/helper.ts', 'src/price.ts']);
+      expect(h.git.commits[0].files).toEqual(['src/price.test.ts']);
+      expect(h.logger.entries.some((e) => e.message === 'Reverted non-test changes made by the AI')).toBe(
+        true,
+      );
+    });
+
+    it('still rejects non-test changes if a restore missed them (last line of defence)', async () => {
       const h = await setup({ maxFixAttempts: 0 });
+      jest.spyOn(h.git, 'restoreNonTestChanges').mockResolvedValue([]);
       h.git.changes = [
         { path: 'src/price.test.ts', kind: 'added' },
         { path: 'src/price.ts', kind: 'modified' },

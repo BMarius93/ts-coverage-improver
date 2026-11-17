@@ -127,6 +127,16 @@ describe('ImprovementJob', () => {
       expect(() => queuedJob().recordPlan(plan(), at(3))).toThrow(IllegalStateTransitionError);
     });
 
+    it('accumulates reverted files without duplicates, only while running', () => {
+      const job = runningJob();
+      job.recordRevertedFiles(['src/b.ts'], at(2));
+      job.recordRevertedFiles(['src/a.ts', 'src/b.ts'], at(3));
+      job.recordRevertedFiles([], at(4));
+      expect(job.revertedFiles).toEqual(['src/a.ts', 'src/b.ts']);
+      expect(job.updatedAt).toEqual(at(3));
+      expect(() => queuedJob().recordRevertedFiles(['x'], at(1))).toThrow(IllegalStateTransitionError);
+    });
+
     it('records coverage only while running', () => {
       const job = runningJob();
       job.recordCoverageBefore(pct(10), at(2));
@@ -248,6 +258,7 @@ describe('ImprovementJob', () => {
       coverageBefore: null,
       coverageAfter: null,
       testPlan: null,
+      revertedFiles: [],
       prUrl: null,
       error: null,
       timeline: [...job.timeline],

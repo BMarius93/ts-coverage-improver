@@ -5,6 +5,8 @@ export type ChangeKind = 'added' | 'modified' | 'deleted' | 'renamed';
 export interface ChangedFile {
   path: string;
   kind: ChangeKind;
+  /** Original path of a rename. */
+  from?: string;
 }
 
 export interface VerificationInput {
@@ -27,6 +29,11 @@ export interface VerificationOutcome {
 }
 
 const TEST_FILE = /\.test\.tsx?$/;
+
+/** The only kind of file the AI may add or modify. */
+export function isTestFilePath(path: string): boolean {
+  return TEST_FILE.test(path);
+}
 
 /**
  * Deterministic gate between "the AI says it is done" and "we open a PR". No AI involved:

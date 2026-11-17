@@ -20,6 +20,7 @@ export interface JobRow {
   coverage_before: number | null;
   coverage_after: number | null;
   test_plan: string | null;
+  reverted_files: string;
   pr_url: string | null;
   error: string | null;
   timeline: string;
@@ -62,6 +63,7 @@ export function toJobColumns(job: ImprovementJob): JobColumns {
     coverage_before: job.coverageBefore?.value ?? null,
     coverage_after: job.coverageAfter?.value ?? null,
     test_plan: job.testPlan ? JSON.stringify(job.testPlan.toProps()) : null,
+    reverted_files: JSON.stringify(job.revertedFiles),
     pr_url: job.prUrl?.value ?? null,
     error: job.error,
     timeline: JSON.stringify(timeline),
@@ -92,6 +94,7 @@ export function toJob(row: JobRow): ImprovementJob {
     coverageBefore: pct(row.coverage_before),
     coverageAfter: pct(row.coverage_after),
     testPlan: row.test_plan ? unwrap(TestPlan.create(JSON.parse(row.test_plan) as TestPlanProps)) : null,
+    revertedFiles: JSON.parse(row.reverted_files) as string[],
     prUrl: row.pr_url ? unwrap(PullRequestUrl.create(row.pr_url)) : null,
     error: row.error,
     timeline,

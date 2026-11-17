@@ -43,6 +43,8 @@ const schema = z.object({
   AI_MAX_BUDGET_USD: z.coerce.number().positive().default(3),
   AI_TIMEOUT_MS: int(1000, 3_600_000).default(600_000),
   AI_MAX_FIX_ATTEMPTS: int(0, 10).default(2),
+  /** Claude permission rules allowing Write/Edit only on *.test.ts(x); non-test edits are reverted anyway. */
+  AI_RESTRICT_WRITES: bool.default(true),
   /** Runs of the related tests during verification; all must pass with identical coverage. */
   VERIFY_RUNS: int(1, 5).default(2),
 });

@@ -11,7 +11,7 @@ Write tests for `{{targetFile}}` in `{{testFile}}` following this plan:
 
 ## Rules
 
-- Create or edit **only** `{{testFile}}`. Never modify source files, configuration, `package.json` or other tests.
+- Create or edit **only** `{{testFile}}`. Never modify source files, configuration, `package.json` or other tests (such edits are blocked or reverted).
 - Use the repository's existing conventions (Jest + ts-jest, import style, relative imports).
 - Tests must be deterministic: no network, no real timers or clocks without fakes, no random data.
 - You may run `npx jest {{testFile}}` to check your work. Iterate until the tests pass.

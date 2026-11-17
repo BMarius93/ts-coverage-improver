@@ -59,6 +59,7 @@ describe('ClaudeCliAdapter', () => {
     writerMaxTurns: 30,
     maxBudgetUsd: 3,
     timeoutMs: 10_000,
+    restrictWritesToTests: true,
     ...overrides,
   });
   const recorded = (): RecordedCall =>
@@ -168,17 +169,33 @@ describe('ClaudeCliAdapter', () => {
   });
 
   describe('write and fix', () => {
-    it('runs the writer with edit tools and only `npx jest` allowed in Bash', async () => {
+    it('runs the writer in dontAsk mode with writes allowed only for test files', async () => {
       const cli = fakeCli(dir, { stdout: result({ result: 'done' }) });
       await new ClaudeCliAdapter(options(cli), new RecordingLogger()).write(context, plan());
       const call = recorded();
       expect(flag(call.argv, '--model')).toBe('sonnet');
-      expect(flag(call.argv, '--permission-mode')).toBe('acceptEdits');
+      expect(flag(call.argv, '--permission-mode')).toBe('dontAsk');
+      expect(JSON.parse(flag(call.argv, '--settings'))).toEqual({
+        permissions: { allow: ['Edit(**/*.test.ts)', 'Edit(**/*.test.tsx)'] },
+      });
       expect(flag(call.argv, '--tools')).toBe('Read,Grep,Glob,Write,Edit,Bash');
-      expect(flag(call.argv, '--allowedTools')).toBe('Read,Grep,Glob,Write,Edit,Bash(npx jest:*)');
+      expect(flag(call.argv, '--allowedTools')).toBe('Read,Grep,Glob,Bash(npx jest:*)');
+      expect(call.argv).not.toContain('acceptEdits');
       expect(flag(call.argv, '--max-turns')).toBe('30');
       expect(call.stdin).toContain('applies a percentage discount');
       expect(call.stdin).toContain('Create or edit **only** `src/price.test.ts`');
+    });
+
+    it('can fall back to acceptEdits when write restriction is disabled', async () => {
+      const cli = fakeCli(dir, { stdout: result({ result: 'done' }) });
+      await new ClaudeCliAdapter(options(cli, { restrictWritesToTests: false }), new RecordingLogger()).write(
+        context,
+        plan(),
+      );
+      const call = recorded();
+      expect(flag(call.argv, '--permission-mode')).toBe('acceptEdits');
+      expect(flag(call.argv, '--allowedTools')).toBe('Read,Grep,Glob,Bash(npx jest:*),Write,Edit');
+      expect(call.argv).not.toContain('--settings');
     });
 
     it('lets the verifier judge a writer that ran out of turns', async () => {
@@ -223,7 +240,7 @@ describe('ClaudeCliAdapter', () => {
       });
       expect(testPlan.testFile.value).toBe('src/price.test.ts');
       const call = recorded();
-      expect(flag(call.argv, '--permission-mode')).toBe('acceptEdits');
+      expect(flag(call.argv, '--permission-mode')).toBe('dontAsk');
       expect(call.stdin).toContain('0% (no test imports this file yet)');
       expect(call.stdin).toContain('Uncovered lines: unknown');
     });
