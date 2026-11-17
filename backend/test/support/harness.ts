@@ -83,6 +83,7 @@ export function createHarness(
         ['src/price.ts', 10],
         ['src/cache.ts', 20],
         ['src/ok.ts', 95],
+        ['src/index.ts', 0, 're-export-only'],
       ]),
       defaultBranch: 'main',
       now: clock.now(),

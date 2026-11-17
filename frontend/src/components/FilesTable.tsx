@@ -1,4 +1,4 @@
-import { formatPercent, isJobActive } from '../lib/format';
+import { formatPercent, improveAction } from '../lib/format';
 import type { FileRow, Repository } from '../lib/types';
 import { CoverageBar } from './CoverageBar';
 import { JobBadge } from './JobBadge';
@@ -58,8 +58,18 @@ export function FilesTable({ repository, files, belowOnly, onToggleBelowOnly, on
             {files.map((file) => {
               const job = file.latestJob;
               return (
-                <tr key={file.path}>
-                  <td className="path">{file.path}</td>
+                <tr key={file.path} className={file.skippedReason ? 'skipped' : undefined}>
+                  <td className="path">
+                    {file.path}
+                    {file.skippedReason && (
+                      <span
+                        className="skip-label"
+                        title="Files that only re-export other modules have no logic of their own to test"
+                      >
+                        skipped: {file.skippedReason}
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <CoverageBar value={file.lines} threshold={repository.threshold} />
                   </td>
@@ -85,17 +95,19 @@ export function FilesTable({ repository, files, belowOnly, onToggleBelowOnly, on
                     )}
                   </td>
                   <td className="actions">
-                    <button
-                      type="button"
-                      disabled={isJobActive(job)}
-                      onClick={() => onImprove(file.path)}
-                      title={
-                        file.belowThreshold ? 'Generate tests and open a PR' : 'Already above the threshold'
-                      }
-                      className={file.belowThreshold ? '' : 'secondary'}
-                    >
-                      Improve
-                    </button>
+                    {improveAction(file) !== 'hidden' && (
+                      <button
+                        type="button"
+                        disabled={improveAction(file) === 'disabled'}
+                        onClick={() => onImprove(file.path)}
+                        title={
+                          file.belowThreshold ? 'Generate tests and open a PR' : 'Already above the threshold'
+                        }
+                        className={file.belowThreshold ? '' : 'secondary'}
+                      >
+                        Improve
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

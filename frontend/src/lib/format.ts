@@ -28,6 +28,12 @@ export function isJobActive(job: Job | null | undefined): boolean {
   return job?.status === 'queued' || job?.status === 'running';
 }
 
+/** Skipped files (e.g. re-export-only) get no Improve button; others only while no job is active. */
+export function improveAction(file: FileRow): 'hidden' | 'disabled' | 'enabled' {
+  if (file.skippedReason) return 'hidden';
+  return isJobActive(file.latestJob) ? 'disabled' : 'enabled';
+}
+
 /** Short human label for a job, e.g. "Running · Writing tests" or "Failed during verifying". */
 export function jobLabel(job: Job): string {
   switch (job.status) {

@@ -17,6 +17,7 @@ export function toHttpException(error: DomainError): HttpException {
     case 'NOT_FOUND':
       return new NotFoundException(body);
     case 'CONFLICT':
+    case 'NOT_AN_IMPROVEMENT_CANDIDATE':
     case 'ILLEGAL_STATE_TRANSITION':
     case 'CONCURRENCY_CONFLICT':
       return new ConflictException(body);

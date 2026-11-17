@@ -28,6 +28,18 @@ describe('RequestImprovement', () => {
     expect(!result.ok && result.error.code).toBe(code);
   });
 
+  it('rejects a re-export-only file with a domain error', async () => {
+    const h = createHarness();
+    await h.seedRepository();
+    const result = await h.requestImprovement.execute({ repositoryId: 'repo-1', filePath: 'src/index.ts' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('NOT_AN_IMPROVEMENT_CANDIDATE');
+      expect(result.error.message).toContain('re-exports only');
+    }
+    expect(await h.jobs.findActiveByRepository('repo-1')).toEqual([]);
+  });
+
   it('rejects unknown repositories', async () => {
     const h = createHarness();
     const result = await h.requestImprovement.execute({ repositoryId: 'nope', filePath: 'src/price.ts' });

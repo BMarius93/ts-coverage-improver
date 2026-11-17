@@ -457,3 +457,32 @@ Short ADRs, appended phase by phase. Format: context → decision → alternativ
 - **Decision (dashboard):** a file whose latest job completed shows "before → after" line coverage and the PR link
   directly in its row, not only in the job drawer.
 - **Consequences:** reviewers see cost, stability and any reverted tampering without opening the dashboard.
+
+### ADR-7.6 Re-export-only files are not improvement candidates
+- **Context:** A scan of the demo repository listed `src/index.ts` (only `export * from …`) at 0 % and the AI wrote
+  a low-value "barrel test" for it. ADR-3.5 had already noted the effect.
+- **Decision (rule in the domain):** `FileCoverage` has a `kind: 'module' | 're-export-only'` (default `module`).
+  `CoverageAnalyzer.analyze()` returns `candidates` and, separately, `skipped` files with the reason
+  `'re-exports only'` (re-export-only files below the threshold); `filesNeedingImprovement` returns candidates
+  only. `RequestImprovement` asks `CoverageAnalyzer.assertImprovable` and returns
+  `NotAnImprovementCandidateError` (`NOT_AN_IMPROVEMENT_CANDIDATE`, mapped to 409). The dashboard API lists skipped
+  files after the candidates with `kind` and `skippedReason`; the snapshot summary gains `filesSkipped`.
+- **Decision (detection in infrastructure):** `SourceFileClassifier` parses each covered file with the TypeScript
+  compiler API (`ts.createSourceFile`, no type-check, no I/O of its own) during the scan (`JestCoverageRunner.
+  measureRepository`). `re-export-only` = at least one statement and every top-level statement is an
+  `ExportDeclaration` with a module specifier: `export * from`, `export * as x from`, `export { a, b as c } from`,
+  `export type { T } from`. Comments are trivia. Empty and comment-only files are `module` (they re-export
+  nothing; istanbul reports them at 100 % anyway). Any parse diagnostic or exception → `module`, so a classifier
+  mistake can only keep a file as a candidate, never hide real logic. It uses the **backend's own** `typescript`
+  (the target may not have one, or a different version); `typescript` moved from `devDependencies` to
+  `dependencies` because the scan needs it at runtime. Persisted as `file_coverages.kind` (migration
+  `004_file_kind.sql`, default `module` for older snapshots).
+- **Why not a `COVERAGE_SOURCE_GLOB` exclusion (`!**/index.ts`):** a name says nothing about content — other
+  repositories keep real logic in files named `index.ts`, which a glob would silently hide from scans. The rule
+  is content-based, unit-tested in the domain (and the classifier on fixtures), enforced at request time too,
+  and visible in the UI ("skipped: re-exports only") instead of the file just disappearing.
+- **Split:** infrastructure *detects* what a file is (parsing is I/O-adjacent and tool-specific); the domain
+  *decides* what that means for improvement. Another detector (e.g. for a different language) would reuse the
+  same rule.
+- **Consequences:** a barrel that also declares something (e.g. a `version()` function) stays a candidate — it
+  has logic. Re-export-only files remain visible (greyed out) in the files table.

@@ -290,6 +290,27 @@ tr:last-child td {
   word-break: break-all;
 }
 
+tr.skipped td {
+  color: var(--muted);
+}
+
+tr.skipped .coverage {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.skip-label {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef0f4;
+  color: var(--muted);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .col-coverage {
   width: 190px;
 }

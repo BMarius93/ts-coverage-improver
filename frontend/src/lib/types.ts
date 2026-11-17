@@ -9,6 +9,7 @@ export interface SnapshotSummary {
   takenAt: string;
   fileCount: number;
   filesBelowThreshold: number;
+  filesSkipped: number;
   averageLineCoverage: number | null;
 }
 
@@ -63,8 +64,13 @@ export interface Job {
   finishedAt: string | null;
 }
 
+export type FileKind = 'module' | 're-export-only';
+
 export interface FileRow {
   path: string;
+  kind: FileKind;
+  /** Why the file is never offered for improvement, e.g. 're-exports only'. */
+  skippedReason: string | null;
   lines: number;
   branches: number;
   functions: number;

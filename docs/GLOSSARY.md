@@ -12,7 +12,8 @@ Ubiquitous language used in code, API and UI.
 | **Coverage percentage** | Value object in [0, 100], two decimals; computed from covered/total counts (empty file = 100%). | `CoveragePercentage` |
 | **Threshold** | Minimum **line** coverage a file should have (default 80%). | `CoverageThreshold` |
 | **File path** | Repository-relative POSIX path to a `.ts`/`.tsx` file; rejects `..`, absolute paths and odd characters. | `FilePath` |
-| **Coverage analyzer** | Domain service: files below the threshold, lowest coverage first (tests and `.d.ts` excluded). | `CoverageAnalyzer` |
+| **Re-export-only file** | A source file whose every statement is an `export … from` (a "barrel", typically `index.ts`). It has no logic of its own, so it is never an improvement candidate; shown as "skipped: re-exports only". Detected by parsing, decided by the domain. | `FileKind`, `SourceFileClassifier`, `CoverageAnalyzer.skipReason` |
+| **Coverage analyzer** | Domain service: improvement candidates (below the threshold, lowest coverage first; tests, `.d.ts` and re-export-only files excluded) and the files it skipped, with the reason. | `CoverageAnalyzer` |
 | **Target file** | The source file an improvement job writes tests for. | `ImprovementJob.targetFile` |
 | **Improvement job** | Aggregate for one "raise coverage of this file" request: status, phase, attempts, coverage before/after, plan, PR, error, timeline. | `ImprovementJob` |
 | **Status** | Lifecycle of a job: `queued → running → completed | failed` (and `running → queued` on requeue). | `JobStatus` |

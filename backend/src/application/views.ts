@@ -1,6 +1,6 @@
-import { CoverageAnalyzer } from '../domain/coverage/coverage-analyzer';
+import { CoverageAnalyzer, SkipReason } from '../domain/coverage/coverage-analyzer';
 import { CoverageThreshold } from '../domain/coverage/coverage-threshold';
-import { FileCoverage } from '../domain/coverage/file-coverage';
+import { FileCoverage, FileKind } from '../domain/coverage/file-coverage';
 import { ImprovementJob } from '../domain/job/improvement-job';
 import { JobPhase, JobStatus } from '../domain/job/job-status';
 import { TestPlanProps } from '../domain/job/test-plan';
@@ -12,7 +12,10 @@ export interface SnapshotSummaryView {
   commitSha: string;
   takenAt: string;
   fileCount: number;
+  /** Improvement candidates: below the threshold and not skipped. */
   filesBelowThreshold: number;
+  /** Below the threshold but deliberately skipped (e.g. re-export-only files). */
+  filesSkipped: number;
   averageLineCoverage: number | null;
 }
 
@@ -63,6 +66,9 @@ export interface JobView {
 
 export interface FileView {
   path: string;
+  kind: FileKind;
+  /** Why the file is never offered for improvement (e.g. 're-exports only'), or null. */
+  skippedReason: SkipReason | null;
   lines: number;
   branches: number;
   functions: number;
@@ -114,13 +120,15 @@ export function toRepositoryView(
   let latestSnapshot: SnapshotSummaryView | null = null;
   if (snapshot) {
     const files = snapshot.files;
+    const analysis = analyzer.analyze(snapshot, threshold);
     const average =
       files.length === 0 ? null : files.reduce((sum, file) => sum + file.lines.value, 0) / files.length;
     latestSnapshot = {
       commitSha: snapshot.commitSha,
       takenAt: snapshot.takenAt.toISOString(),
       fileCount: files.length,
-      filesBelowThreshold: analyzer.filesNeedingImprovement(snapshot, threshold).length,
+      filesBelowThreshold: analysis.candidates.length,
+      filesSkipped: analysis.skipped.length,
       averageLineCoverage: average === null ? null : Math.round(average * 100) / 100,
     };
   }
@@ -143,10 +151,13 @@ export function toRepositoryView(
 export function toFileView(
   file: FileCoverage,
   belowThreshold: boolean,
+  skippedReason: SkipReason | null,
   latestJob: ImprovementJob | null,
 ): FileView {
   return {
     path: file.path.value,
+    kind: file.kind,
+    skippedReason,
     lines: file.metrics.lines.value,
     branches: file.metrics.branches.value,
     functions: file.metrics.functions.value,

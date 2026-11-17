@@ -11,6 +11,7 @@ import { FilePath } from '../../../domain/coverage/file-path';
 import { childEnv } from '../../process/child-env';
 import { ProcessError, ProcessResult, runProcess, runProcessOrThrow, tail } from '../../process/run-process';
 import { CoverageFinalJson, CoverageReportParser, CoverageSummaryJson } from './coverage-report-parser';
+import { SourceFileClassifier } from '../source-file-classifier';
 import { TestFileScanner } from './test-file-scanner';
 
 export interface JestCoverageRunnerOptions {
@@ -31,6 +32,7 @@ export class JestCoverageRunner implements CoverageRunnerPort {
   constructor(
     private readonly options: JestCoverageRunnerOptions,
     private readonly scanner = new TestFileScanner(),
+    private readonly classifier = new SourceFileClassifier(),
   ) {}
 
   async installDependencies(dir: string): Promise<void> {
@@ -57,10 +59,13 @@ export class JestCoverageRunner implements CoverageRunnerPort {
         join(reportDir, 'coverage-summary.json'),
         result,
       );
-      return {
-        files: new CoverageReportParser(dir).parseSummary(summary),
-        testsPassed: result.exitCode === 0,
-      };
+      const files = await Promise.all(
+        new CoverageReportParser(dir).parseSummary(summary).map(async (file) => {
+          const content = await readFile(join(dir, file.path.value), 'utf8').catch(() => null);
+          return content === null ? file : file.withKind(this.classifier.classify(file.path.value, content));
+        }),
+      );
+      return { files, testsPassed: result.exitCode === 0 };
     });
   }
 

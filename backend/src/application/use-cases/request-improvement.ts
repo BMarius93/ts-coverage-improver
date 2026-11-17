@@ -1,3 +1,4 @@
+import { CoverageAnalyzer, NotAnImprovementCandidateError } from '../../domain/coverage/coverage-analyzer';
 import { FilePath } from '../../domain/coverage/file-path';
 import { ImprovementJob } from '../../domain/job/improvement-job';
 import { ImprovementJobRepository } from '../../domain/job/improvement-job-repository';
@@ -17,11 +18,13 @@ export interface JobBudgetPolicy {
   maxDurationMs: number;
 }
 
-export type RequestImprovementError = ValidationError | NotFoundError | ConflictError;
+export type RequestImprovementError =
+  ValidationError | NotFoundError | ConflictError | NotAnImprovementCandidateError;
 
 /** Queues an improvement job for one file of the latest snapshot. */
 export class RequestImprovement {
   private readonly policy = new JobSchedulingPolicy();
+  private readonly analyzer = new CoverageAnalyzer();
 
   constructor(
     private readonly repositories: RepositoryRepository,
@@ -50,8 +53,13 @@ export class RequestImprovement {
     if (!snapshot) {
       return err(new ConflictError('Scan the repository before requesting improvements'));
     }
-    if (!snapshot.fileFor(targetFile.value)) {
+    const file = snapshot.fileFor(targetFile.value);
+    if (!file) {
       return err(new NotFoundError('File in latest coverage snapshot', targetFile.value.value));
+    }
+    const improvable = this.analyzer.assertImprovable(file);
+    if (!improvable.ok) {
+      return improvable;
     }
 
     const active = await this.jobs.findActiveByRepository(repository.id);

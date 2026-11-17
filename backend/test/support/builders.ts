@@ -1,6 +1,6 @@
 import { CoveragePercentage } from '../../src/domain/coverage/coverage-percentage';
 import { CoverageSnapshot } from '../../src/domain/coverage/coverage-snapshot';
-import { FileCoverage } from '../../src/domain/coverage/file-coverage';
+import { FileCoverage, FileKind } from '../../src/domain/coverage/file-coverage';
 import { FilePath } from '../../src/domain/coverage/file-path';
 import { ImprovementJob } from '../../src/domain/job/improvement-job';
 import { TestPlan } from '../../src/domain/job/test-plan';
@@ -18,17 +18,23 @@ export const path = (value: string): FilePath => unwrap(FilePath.create(value));
 export const repoUrl = (value = 'https://github.com/acme/widgets'): GitHubRepoUrl =>
   unwrap(GitHubRepoUrl.create(value));
 
-export const fileCoverage = (file: string, lines: number): FileCoverage =>
-  new FileCoverage(path(file), {
-    lines: pct(lines),
-    branches: pct(lines),
-    functions: pct(lines),
-    statements: pct(lines),
-  });
+export const fileCoverage = (file: string, lines: number, kind: FileKind = 'module'): FileCoverage =>
+  new FileCoverage(
+    path(file),
+    { lines: pct(lines), branches: pct(lines), functions: pct(lines), statements: pct(lines) },
+    kind,
+  );
 
-export const snapshot = (files: Array<[string, number]>, commitSha = 'a'.repeat(40)): CoverageSnapshot =>
+export const snapshot = (
+  files: Array<[string, number] | [string, number, FileKind]>,
+  commitSha = 'a'.repeat(40),
+): CoverageSnapshot =>
   unwrap(
-    CoverageSnapshot.create({ commitSha, takenAt: T0, files: files.map(([f, l]) => fileCoverage(f, l)) }),
+    CoverageSnapshot.create({
+      commitSha,
+      takenAt: T0,
+      files: files.map(([f, l, k]) => fileCoverage(f, l, k)),
+    }),
   );
 
 export const plan = (testFilePath = 'src/price.test.ts'): TestPlan =>

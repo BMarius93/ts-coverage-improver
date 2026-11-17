@@ -148,6 +148,11 @@ describe('Improvement jobs (e2e: real git, npm, Jest and verifier; scripted AI; 
     await request(http).post('/jobs').send({ repositoryId }).expect(400);
     await request(http).post('/jobs').send({ repositoryId, filePath: '../../etc/passwd.ts' }).expect(400);
     await request(http).post('/jobs').send({ repositoryId, filePath: 'src/nope.ts' }).expect(404);
+    const barrel = await request(http)
+      .post('/jobs')
+      .send({ repositoryId, filePath: 'src/index.ts' })
+      .expect(409);
+    expect(barrel.body).toMatchObject({ code: 'NOT_AN_IMPROVEMENT_CANDIDATE' });
     await request(http).post('/jobs').send({ repositoryId: 'nope', filePath: 'src/strings.ts' }).expect(404);
     await request(http).get('/jobs/nope').expect(404);
     await request(http).get('/repositories/nope/jobs').expect(404);

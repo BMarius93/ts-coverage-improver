@@ -37,6 +37,7 @@ describe('SqliteRepositoryRepository', () => {
       snapshot: snapshot([
         ['src/a.ts', 12.5],
         ['src/b.ts', 90],
+        ['src/index.ts', 0, 're-export-only'],
       ]),
       defaultBranch: 'main',
       now: at(2),
@@ -50,9 +51,10 @@ describe('SqliteRepositoryRepository', () => {
     expect(loaded?.scanStatus).toBe('succeeded');
     expect(loaded?.defaultBranch).toBe('main');
     expect(loaded?.scanStartedAt).toEqual(at(1));
-    expect(loaded?.latestSnapshot?.files.map((f) => [f.path.value, f.lines.value])).toEqual([
-      ['src/a.ts', 12.5],
-      ['src/b.ts', 90],
+    expect(loaded?.latestSnapshot?.files.map((f) => [f.path.value, f.lines.value, f.kind])).toEqual([
+      ['src/a.ts', 12.5, 'module'],
+      ['src/b.ts', 90, 'module'],
+      ['src/index.ts', 0, 're-export-only'],
     ]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM coverage_snapshots').get()).toEqual({ n: 1 });
   });

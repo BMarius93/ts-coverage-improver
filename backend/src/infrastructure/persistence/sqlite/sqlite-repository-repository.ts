@@ -1,6 +1,6 @@
 import { CoveragePercentage } from '../../../domain/coverage/coverage-percentage';
 import { CoverageSnapshot } from '../../../domain/coverage/coverage-snapshot';
-import { FileCoverage } from '../../../domain/coverage/file-coverage';
+import { FileCoverage, FileKind } from '../../../domain/coverage/file-coverage';
 import { FilePath } from '../../../domain/coverage/file-path';
 import { GitHubRepoUrl } from '../../../domain/repository/github-repo-url';
 import { Repository, ScanStatus } from '../../../domain/repository/repository';
@@ -30,6 +30,7 @@ interface SnapshotRow {
 
 interface FileCoverageRow {
   path: string;
+  kind: FileKind;
   lines: number;
   branches: number;
   functions: number;
@@ -135,14 +136,15 @@ export class SqliteRepositoryRepository implements RepositoryRepository {
       .prepare('INSERT INTO coverage_snapshots (repository_id, commit_sha, taken_at) VALUES (?, ?, ?)')
       .run(repositoryId, snapshot.commitSha, snapshot.takenAt.toISOString());
     const insertFile = this.db.prepare(
-      `INSERT INTO file_coverages (snapshot_id, path, lines, branches, functions, statements)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO file_coverages (snapshot_id, path, kind, lines, branches, functions, statements)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const file of snapshot.files) {
       const m = file.metrics;
       insertFile.run(
         lastInsertRowid,
         file.path.value,
+        file.kind,
         m.lines.value,
         m.branches.value,
         m.functions.value,
@@ -161,12 +163,16 @@ export class SqliteRepositoryRepository implements RepositoryRepository {
       .all(row.id)
       .map(
         (file) =>
-          new FileCoverage(unwrap(FilePath.create(file.path)), {
-            lines: unwrap(CoveragePercentage.create(file.lines)),
-            branches: unwrap(CoveragePercentage.create(file.branches)),
-            functions: unwrap(CoveragePercentage.create(file.functions)),
-            statements: unwrap(CoveragePercentage.create(file.statements)),
-          }),
+          new FileCoverage(
+            unwrap(FilePath.create(file.path)),
+            {
+              lines: unwrap(CoveragePercentage.create(file.lines)),
+              branches: unwrap(CoveragePercentage.create(file.branches)),
+              functions: unwrap(CoveragePercentage.create(file.functions)),
+              statements: unwrap(CoveragePercentage.create(file.statements)),
+            },
+            file.kind,
+          ),
       );
     return unwrap(
       CoverageSnapshot.create({ commitSha: row.commit_sha, takenAt: new Date(row.taken_at), files }),

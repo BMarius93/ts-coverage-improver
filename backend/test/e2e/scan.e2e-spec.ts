@@ -32,12 +32,23 @@ describe('Scan pipeline (e2e, local fixture repository, no network)', () => {
     expect(scanned.scanError).toBeNull();
     expect(scanned.scanStatus).toBe('succeeded');
     expect(scanned.defaultBranch).toBe('main');
-    expect(scanned.latestSnapshot).toMatchObject({ fileCount: 3, filesBelowThreshold: 2 });
+    expect(scanned.latestSnapshot).toMatchObject({ fileCount: 4, filesBelowThreshold: 2, filesSkipped: 1 });
 
     const below = await request(http).get(`/repositories/${id}/files?belowThreshold=true`).expect(200);
     expect(below.body).toEqual([
       expect.objectContaining({ path: 'src/strings.ts', lines: 0, belowThreshold: true, latestJob: null }),
-      expect.objectContaining({ path: 'src/math.ts', belowThreshold: true }),
+      expect.objectContaining({
+        path: 'src/math.ts',
+        belowThreshold: true,
+        kind: 'module',
+        skippedReason: null,
+      }),
+      // The barrel is below the threshold (no test imports it) but classified and skipped.
+      expect.objectContaining({
+        path: 'src/index.ts',
+        kind: 're-export-only',
+        skippedReason: 're-exports only',
+      }),
     ]);
     const math = (below.body as Array<{ path: string; lines: number }>)[1];
     expect(math.lines).toBeGreaterThan(0);
@@ -46,6 +57,7 @@ describe('Scan pipeline (e2e, local fixture repository, no network)', () => {
     const all = await request(http).get(`/repositories/${id}/files`).expect(200);
     expect((all.body as Array<{ path: string }>).map((f) => f.path)).toEqual([
       'src/fully-covered.ts',
+      'src/index.ts',
       'src/math.ts',
       'src/strings.ts',
     ]);

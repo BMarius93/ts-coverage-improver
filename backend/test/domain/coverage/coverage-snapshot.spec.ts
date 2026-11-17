@@ -1,4 +1,7 @@
-import { CoverageAnalyzer } from '../../../src/domain/coverage/coverage-analyzer';
+import {
+  CoverageAnalyzer,
+  NotAnImprovementCandidateError,
+} from '../../../src/domain/coverage/coverage-analyzer';
 import { CoverageSnapshot } from '../../../src/domain/coverage/coverage-snapshot';
 import { CoverageThreshold } from '../../../src/domain/coverage/coverage-threshold';
 import { fileCoverage, path, snapshot, T0 } from '../../support/builders';
@@ -52,6 +55,46 @@ describe('CoverageAnalyzer', () => {
     expect(
       analyzer.filesNeedingImprovement(snap, CoverageThreshold.default()).map((f) => f.path.value),
     ).toEqual(['src/a.ts']);
+  });
+
+  it('never offers re-export-only files, even at 0%, but reports them as skipped', () => {
+    const snap = snapshot([
+      ['src/index.ts', 0, 're-export-only'],
+      ['src/lib/index.ts', 95, 're-export-only'],
+      ['src/price.ts', 10],
+      ['src/ok.ts', 90],
+    ]);
+    const analysis = analyzer.analyze(snap, CoverageThreshold.default());
+    expect(analysis.candidates.map((f) => f.path.value)).toEqual(['src/price.ts']);
+    expect(analysis.skipped.map((s) => [s.file.path.value, s.reason])).toEqual([
+      ['src/index.ts', 're-exports only'],
+    ]);
+    expect(
+      analyzer.filesNeedingImprovement(snap, CoverageThreshold.default()).map((f) => f.path.value),
+    ).toEqual(['src/price.ts']);
+  });
+
+  it('rejects improving a re-export-only file and accepts a module', () => {
+    const barrel = fileCoverage('src/index.ts', 0, 're-export-only');
+    const result = analyzer.assertImprovable(barrel);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(NotAnImprovementCandidateError);
+      expect(result.error.code).toBe('NOT_AN_IMPROVEMENT_CANDIDATE');
+      expect(result.error.message).toBe('src/index.ts is not an improvement candidate: re-exports only');
+    }
+    expect(analyzer.assertImprovable(fileCoverage('src/a.ts', 0)).ok).toBe(true);
+    expect(analyzer.skipReason(barrel)).toBe('re-exports only');
+    expect(analyzer.needsImprovement(barrel, CoverageThreshold.default())).toBe(false);
+  });
+
+  it('defaults files to modules and can reclassify them', () => {
+    const file = fileCoverage('src/a.ts', 10);
+    expect(file.kind).toBe('module');
+    expect(file.isReExportOnly).toBe(false);
+    const barrel = file.withKind('re-export-only');
+    expect(barrel.isReExportOnly).toBe(true);
+    expect(barrel.metrics).toBe(file.metrics);
   });
 
   it('tells whether a single file needs improvement', () => {

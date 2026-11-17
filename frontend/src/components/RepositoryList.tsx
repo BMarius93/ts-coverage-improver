@@ -37,6 +37,7 @@ export function RepositoryList({ repositories, selectedId, onSelect, onScan }: P
                 <span className="repo-stats">
                   avg {formatPercent(snapshot.averageLineCoverage)} · {snapshot.filesBelowThreshold}/
                   {snapshot.fileCount} files below {repo.threshold}%
+                  {snapshot.filesSkipped > 0 && ` (${snapshot.filesSkipped} skipped)`}
                 </span>
               )}
               {repo.scanStatus === 'failed' && repo.scanError && (

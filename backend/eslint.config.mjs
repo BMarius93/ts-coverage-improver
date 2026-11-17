@@ -21,7 +21,7 @@ const INFRASTRUCTURE_LIBS = [
 ];
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'eslint.config.mjs', 'jest.config.js', 'test/jest-e2e.config.js'] },
+  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'test/fixtures/**', 'eslint.config.mjs', 'jest.config.js', 'test/jest-e2e.config.js'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   prettier,

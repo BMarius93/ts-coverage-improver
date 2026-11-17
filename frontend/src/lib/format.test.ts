@@ -5,6 +5,7 @@ import {
   formatDuration,
   formatPercent,
   formatUsd,
+  improveAction,
   isJobActive,
   jobLabel,
   pollInterval,
@@ -75,6 +76,15 @@ describe('format helpers', () => {
     expect(pollInterval([repo('scanning')], [], null)).toBe(2500);
     expect(pollInterval([repo('succeeded')], [file(job({ status: 'running' }))], null)).toBe(2500);
     expect(pollInterval([], [], job({ status: 'queued' }))).toBe(2500);
+  });
+
+  it('hides Improve for skipped files and disables it while a job is active', () => {
+    const row = (overrides: Partial<FileRow>): FileRow =>
+      ({ path: 'src/a.ts', skippedReason: null, latestJob: null, ...overrides }) as FileRow;
+    expect(improveAction(row({ skippedReason: 're-exports only' }))).toBe('hidden');
+    expect(improveAction(row({ latestJob: job({ status: 'running' }) }))).toBe('disabled');
+    expect(improveAction(row({ latestJob: job({ status: 'failed' }) }))).toBe('enabled');
+    expect(improveAction(row({}))).toBe('enabled');
   });
 
   it('formats money', () => {

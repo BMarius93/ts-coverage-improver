@@ -126,6 +126,9 @@ Paths are relative to the backend's working directory.
   `CoverageAnalyzer`, `JobSchedulingPolicy`, `ImprovementVerifier`) has no framework imports; `application` (use
   cases + ports) only knows interfaces; `infrastructure` implements ports; `interface/http` maps HTTP ↔ use cases.
   ESLint enforces the import rules. Use cases are plain classes wired by Nest factories.
+- **Only files worth testing are offered.** The scan classifies every covered file with the TypeScript parser;
+  files that only re-export other modules (barrels such as `export * from './x'`) are shown greyed out as
+  "skipped: re-exports only" and cannot be improved — a domain rule in `CoverageAnalyzer`, not a filename glob.
   → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **Reliable jobs.** Atomic claim in `BEGIN IMMEDIATE` (proven by a 6-process race test), partial unique indexes
   (one running job per repo, one active job per file), optimistic versioning, lease + heartbeat, reaper on startup
@@ -168,7 +171,7 @@ points `GIT_CLONE_BASE_URL` at it and replaces only the AI and GitHub-API ports.
 | Failed pipeline steps are not retried automatically | Only crashes/expired leases are retried; a failed job can be re-requested by the user. | Classify transient errors (network, rate limits) and requeue with backoff. |
 | Polling dashboard | Simple and robust. | Server-Sent Events from the API. |
 | A hard-killed (`kill -9`) backend leaves its child processes running | Children run in their own process group so timeouts can kill grandchildren; `SIGKILL` cannot be intercepted. Graceful shutdown kills them; each retry uses a fresh per-attempt workspace, so orphans cannot interfere. | Run jobs in containers (see above) or a supervisor that owns the process groups. |
-| Barrel files (`index.ts` with re-exports) appear with low coverage | The scan glob overrides the target's own `collectCoverageFrom`. | Respect the target's Jest config when present, or ignore files with no executable lines besides exports. |
+| The scan glob overrides the target's own `collectCoverageFrom` | One consistent definition of "source files" across repositories; re-export-only barrels are recognised and skipped, but other generated or trivial files (e.g. constants-only modules) may still be listed. | Respect the target's Jest config when present; extend `SourceFileClassifier` with more kinds (constants-only, type-only modules). |
 | AI output format | The plan is extracted from the final message text and validated (zod + domain rules). | Use the CLI's `--json-schema` structured output once relied upon. |
 | Write restriction for the AI relies on Claude Code permission rules (`dontAsk` + `Edit(**/*.test.ts)`) | Flags verified against v2.1.326 and the docs, but enforcement can only be observed in a paid run; `AI_RESTRICT_WRITES=false` falls back to `acceptEdits`. | Correctness does not depend on it: non-test edits are reverted by git and rejected by the verifier. Add a recorded real run to CI with a small budget. |
 | Flaky detection is heuristic | `VERIFY_RUNS` identical runs catch most nondeterminism, not all (e.g. rare races, time-of-day). | Run with `--randomize` / in a different order, or more runs for files with timers. |

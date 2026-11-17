@@ -1,3 +1,5 @@
+import { NotAnImprovementCandidateError } from '../../src/domain/coverage/coverage-analyzer';
+import { fileCoverage } from '../support/builders';
 import { BadRequestException } from '@nestjs/common';
 import { NotFoundError } from '../../src/application/errors';
 import {
@@ -22,6 +24,13 @@ describe('domain error mapping', () => {
     [new NotFoundError('Job', '1'), 404],
     [new ConflictError('x'), 409],
     [new ConcurrencyConflictError('Job', '1'), 409],
+    [
+      new NotAnImprovementCandidateError(
+        fileCoverage('src/index.ts', 0, 're-export-only'),
+        're-exports only',
+      ),
+      409,
+    ],
     [new OddError(), 500],
   ])('%p -> %p', (error, status) => {
     const exception = toHttpException(error);

@@ -17,9 +17,10 @@ describe('GetDashboard', () => {
     expect(repo.latestSnapshot).toEqual({
       commitSha: 'a'.repeat(40),
       takenAt: expect.any(String),
-      fileCount: 3,
+      fileCount: 4,
       filesBelowThreshold: 2,
-      averageLineCoverage: 41.67,
+      filesSkipped: 1,
+      averageLineCoverage: 31.25,
     });
   });
 
@@ -28,14 +29,20 @@ describe('GetDashboard', () => {
     const jobId = await h.queue('src/cache.ts');
 
     const all = await h.dashboard.listFiles('repo-1', { belowThresholdOnly: false });
-    expect(all.ok && all.value.map((f) => [f.path, f.belowThreshold])).toEqual([
-      ['src/cache.ts', true],
-      ['src/ok.ts', false],
-      ['src/price.ts', true],
+    expect(all.ok && all.value.map((f) => [f.path, f.belowThreshold, f.kind, f.skippedReason])).toEqual([
+      ['src/cache.ts', true, 'module', null],
+      ['src/index.ts', true, 're-export-only', 're-exports only'],
+      ['src/ok.ts', false, 'module', null],
+      ['src/price.ts', true, 'module', null],
     ]);
 
+    // Candidates lowest first, then the skipped files so the UI can explain why they are not offered.
     const below = await h.dashboard.listFiles('repo-1', { belowThresholdOnly: true });
-    expect(below.ok && below.value.map((f) => f.path)).toEqual(['src/price.ts', 'src/cache.ts']);
+    expect(below.ok && below.value.map((f) => [f.path, f.skippedReason])).toEqual([
+      ['src/price.ts', null],
+      ['src/cache.ts', null],
+      ['src/index.ts', 're-exports only'],
+    ]);
     expect(below.ok && below.value[1].latestJob?.id).toBe(jobId);
     expect(below.ok && below.value[0].latestJob).toBeNull();
   });

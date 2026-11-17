@@ -36,8 +36,9 @@ export class GetDashboard {
   }
 
   /**
-   * Files of the latest snapshot with the latest job of each. With `belowThresholdOnly` the list is
-   * what the analyzer recommends (lowest coverage first); otherwise all files sorted by path.
+   * Files of the latest snapshot with the latest job of each. With `belowThresholdOnly` the list is what the
+   * analyzer recommends (lowest coverage first) followed by the below-threshold files it skipped, so the UI
+   * can say why they are not offered; otherwise all files sorted by path.
    */
   async listFiles(
     id: string,
@@ -57,15 +58,18 @@ export class GetDashboard {
         latestJobByFile.set(job.targetFile.value, job);
       }
     }
-    const below = new Set(
-      this.analyzer.filesNeedingImprovement(snapshot, this.threshold).map((file) => file.path.value),
-    );
+    const analysis = this.analyzer.analyze(snapshot, this.threshold);
     const files = options.belowThresholdOnly
-      ? this.analyzer.filesNeedingImprovement(snapshot, this.threshold)
+      ? [...analysis.candidates, ...analysis.skipped.map((skipped) => skipped.file)]
       : snapshot.files;
     return ok(
       files.map((file) =>
-        toFileView(file, below.has(file.path.value), latestJobByFile.get(file.path.value) ?? null),
+        toFileView(
+          file,
+          !this.threshold.isMetBy(file.lines),
+          this.analyzer.skipReason(file),
+          latestJobByFile.get(file.path.value) ?? null,
+        ),
       ),
     );
   }
